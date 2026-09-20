@@ -201,6 +201,46 @@ def parse_syllabus_docx(source: PdfSource, *, max_lines: int = 800) -> str:
     return "\n".join(out)
 
 
+def parse_pptx_text(source: PdfSource, *, max_lines: int = 400) -> str:
+    """Extract per-slide text from a PPTX without another dependency."""
+    with zipfile.ZipFile(source) as archive:
+        slide_names = sorted(
+            (name for name in archive.namelist()
+             if re.fullmatch(r"ppt/slides/slide\d+\.xml", name)),
+            key=lambda name: int(re.search(r"\d+", name).group()),
+        )
+        namespace = {"a": "http://schemas.openxmlformats.org/drawingml/2006/main"}
+        lines = []
+        for name in slide_names:
+            slide = ElementTree.fromstring(archive.read(name))
+            texts = (
+                _WHITESPACE_RE.sub(" ", node.text or "").strip()
+                for node in slide.findall(".//a:t", namespace)
+            )
+            slide_text = " | ".join(text for text in texts if text)
+            if slide_text:
+                lines.append(slide_text)
+    if not lines:
+        return "WARNING: no extractable text found in this PPTX file."
+    out = [f"PAGES: {len(lines)}", ""]
+    out.extend(lines[:max_lines])
+    if len(lines) > max_lines:
+        out.append(f"... ({len(lines) - max_lines} slides truncated)")
+    return "\n".join(out)
+
+
+def extract_document_text(source: PdfSource, *, max_lines: int = 400) -> str:
+    """Extract text from an uploaded PDF/DOCX/PPTX for topic matching."""
+    suffix = Path(str(getattr(source, "name", source))).suffix.lower()
+    if suffix == ".pdf":
+        return parse_syllabus_pdf(source, max_lines=max_lines)
+    if suffix == ".docx":
+        return parse_syllabus_docx(source, max_lines=max_lines)
+    if suffix == ".pptx":
+        return parse_pptx_text(source, max_lines=max_lines)
+    raise ValueError(f"Unsupported document type: {suffix or 'unknown'}")
+
+
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         sys.exit("usage: python -m core.services.syllabus_parser <file.pdf>")

@@ -1,8 +1,10 @@
 import json
+import os
+import tempfile
 from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from .models import Document, Prerequisite, Topic
 
@@ -68,13 +70,81 @@ class WorkspaceApiTests(TestCase):
         self.assertTrue(all(tag["id"] in node["tag_ids"] for node in refreshed["nodes"] if node["id"] != topics[0]["id"]))
 
     def test_document_upload_is_saved_and_associated(self):
+        with tempfile.TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+            sandbox = self.post_json("/api/sandboxes/", {"name": "Physics"}).json()["sandbox"]
+            topic = self.post_json(f"/api/sandboxes/{sandbox['id']}/topics/", {"name": "Motion", "tag_ids": []}).json()["topic"]
+            upload = SimpleUploadedFile("notes.pdf", b"%PDF-1.4 test", content_type="application/pdf")
+            response = self.client.post(f"/api/sandboxes/{sandbox['id']}/documents/", {"file": upload, "topic_ids": json.dumps([topic["id"]])})
+            self.assertEqual(response.status_code, 201)
+            self.assertEqual(Document.objects.count(), 1)
+            self.assertEqual(Topic.objects.get(pk=topic["id"]).documents.count(), 1)
+            url = response.json()["document"]["url"]
+            self.assertTrue(url.startswith("/media/documents/"))
+            self.assertTrue(url.endswith(".pdf"))
+            graph = self.client.get(f"/api/sandboxes/{sandbox['id']}/graph/").json()
+            self.assertEqual(graph["nodes"][0]["documents"][0]["url"], url)
+
+    def test_slide_deck_upload_is_accepted(self):
         sandbox = self.post_json("/api/sandboxes/", {"name": "Physics"}).json()["sandbox"]
-        topic = self.post_json(f"/api/sandboxes/{sandbox['id']}/topics/", {"name": "Motion", "tag_ids": []}).json()["topic"]
-        upload = SimpleUploadedFile("notes.pdf", b"%PDF-1.4 test", content_type="application/pdf")
+        topic = self.post_json(f"/api/sandboxes/{sandbox['id']}/topics/", {"name": "Motion"}).json()["topic"]
+        upload = SimpleUploadedFile("lecture.pptx", b"PK fake", content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation")
         response = self.client.post(f"/api/sandboxes/{sandbox['id']}/documents/", {"file": upload, "topic_ids": json.dumps([topic["id"]])})
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(Document.objects.count(), 1)
-        self.assertEqual(Topic.objects.get(pk=topic["id"]).documents.count(), 1)
+
+    def test_document_can_be_assigned_after_upload(self):
+        sandbox = self.post_json("/api/sandboxes/", {"name": "Physics"}).json()["sandbox"]
+        other = self.post_json("/api/sandboxes/", {"name": "Other"}).json()["sandbox"]
+        topic = self.post_json(f"/api/sandboxes/{sandbox['id']}/topics/", {"name": "Motion"}).json()["topic"]
+        foreign = self.post_json(f"/api/sandboxes/{other['id']}/topics/", {"name": "Nope"}).json()["topic"]
+        upload = SimpleUploadedFile("notes.pdf", b"%PDF-1.4 test", content_type="application/pdf")
+        doc = self.client.post(f"/api/sandboxes/{sandbox['id']}/documents/", {"file": upload, "topic_ids": "[]"}).json()["document"]
+        self.assertEqual(doc["topic_ids"], [])
+        response = self.client.patch(f"/api/documents/{doc['id']}/", data=json.dumps({"topic_ids": [topic["id"]]}), content_type="application/json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["document"]["topic_ids"], [topic["id"]])
+        bad = self.client.patch(f"/api/documents/{doc['id']}/", data=json.dumps({"topic_ids": [foreign["id"]]}), content_type="application/json")
+        self.assertEqual(bad.status_code, 400)
+        graph = self.client.get(f"/api/sandboxes/{sandbox['id']}/graph/").json()
+        self.assertEqual(len(graph["documents"]), 1)
+
+    @patch("core.services.graph_builder.match_topics")
+    @patch("core.services.syllabus_parser.extract_document_text")
+    def test_document_auto_assigns_to_matching_topics(self, extract, match):
+        extract.return_value = "Newton's laws: force equals mass times acceleration."
+        match.return_value = [1]
+        sandbox = self.post_json("/api/sandboxes/", {"name": "Physics"}).json()["sandbox"]
+        topics = [
+            self.post_json(f"/api/sandboxes/{sandbox['id']}/topics/", {"name": name}).json()["topic"]
+            for name in ("Motion", "Forces")
+        ]
+        upload = SimpleUploadedFile("lecture.pdf", b"%PDF-1.4 test", content_type="application/pdf")
+        response = self.client.post(f"/api/sandboxes/{sandbox['id']}/documents/", {"file": upload, "topic_ids": "[]"})
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["document"]["topic_ids"], [topics[1]["id"]])
+        self.assertEqual(Topic.objects.get(pk=topics[1]["id"]).documents.count(), 1)
+        self.assertEqual(Topic.objects.get(pk=topics[0]["id"]).documents.count(), 0)
+
+    @patch("core.services.syllabus_parser.extract_document_text", side_effect=ValueError("unsupported"))
+    def test_document_upload_succeeds_when_autoassign_fails(self, extract):
+        sandbox = self.post_json("/api/sandboxes/", {"name": "Physics"}).json()["sandbox"]
+        self.post_json(f"/api/sandboxes/{sandbox['id']}/topics/", {"name": "Motion"})
+        upload = SimpleUploadedFile("deck.ppt", b"binary", content_type="application/vnd.ms-powerpoint")
+        response = self.client.post(f"/api/sandboxes/{sandbox['id']}/documents/", {"file": upload, "topic_ids": "[]"})
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["document"]["topic_ids"], [])
+
+    def test_document_delete_removes_row_and_file(self):
+        with tempfile.TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+            sandbox = self.post_json("/api/sandboxes/", {"name": "Physics"}).json()["sandbox"]
+            topic = self.post_json(f"/api/sandboxes/{sandbox['id']}/topics/", {"name": "Motion"}).json()["topic"]
+            upload = SimpleUploadedFile("notes.pdf", b"%PDF-1.4 test", content_type="application/pdf")
+            doc_id = self.client.post(f"/api/sandboxes/{sandbox['id']}/documents/", {"file": upload, "topic_ids": json.dumps([topic["id"]])}).json()["document"]["id"]
+            path = Document.objects.get(pk=doc_id).file.path
+            self.assertTrue(os.path.exists(path))
+            self.assertEqual(self.client.delete(f"/api/documents/{doc_id}/").status_code, 200)
+            self.assertFalse(Document.objects.exists())
+            self.assertFalse(os.path.exists(path))
+            self.assertEqual(Topic.objects.get(pk=topic["id"]).documents.count(), 0)
 
     @patch("core.services.quiz_generator.generate_quiz")
     def test_topic_quiz_uses_topic_context_and_returns_five_questions(self, generate_quiz):
@@ -125,4 +195,4 @@ class WorkspaceApiTests(TestCase):
         graph = response.json()
         self.assertEqual(graph["nodes"][0]["name"], "Limits")
         self.assertEqual(graph["nodes"][0]["confidence"], 0)
-        self.assertEqual(set(graph), {"sandbox", "nodes", "edges"})
+        self.assertEqual(set(graph), {"sandbox", "nodes", "edges", "documents"})
