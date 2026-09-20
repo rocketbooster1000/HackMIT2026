@@ -26,5 +26,7 @@
     removeTag: (topicId, tagId) => request(`topics/${topicId}/tags/${tagId}/`, {method: 'DELETE'}),
     uploadDocument: (sandboxId, file, topicIds) => { const form = new FormData(); form.append('file', file); form.append('topic_ids', JSON.stringify(topicIds)); return request(`sandboxes/${sandboxId}/documents/`, {method: 'POST', body: form}); },
     uploadSyllabus: (sandboxId, file) => { const form = new FormData(); form.append('file', file); return request(`sandboxes/${sandboxId}/syllabus/`, {method: 'POST', body: form}); },
+    generateVideo: (sandboxId, topicIds) => request('videos/generate/', {method: 'POST', body: JSON.stringify({sandbox_id: sandboxId, topic_ids: topicIds})}),
+    getVideoJob: jobId => request(`videos/jobs/${jobId}/`),
   };
 })();

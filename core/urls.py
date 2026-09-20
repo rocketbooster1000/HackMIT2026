@@ -15,4 +15,6 @@ urlpatterns = [
     path("topics/<int:topic_id>/", views.topic_detail, name="topic-detail"),
     path("topics/<int:topic_id>/tags/<int:tag_id>/", views.remove_tag, name="remove-tag"),
     path("tags/", views.tags, name="tags"),
+    path("videos/generate/", views.generate_video, name="video-generate"),
+    path("videos/jobs/<int:job_id>/", views.video_job_status, name="video-job-status"),
 ]

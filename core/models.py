@@ -60,3 +60,24 @@ class Document(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+
+
+class VideoJob(models.Model):
+    class Status(models.TextChoices):
+        QUEUED = "queued"
+        GENERATING_SCRIPT = "generating_script"
+        GENERATING_AUDIO = "generating_audio"
+        RENDERING = "rendering"
+        DONE = "done"
+        FAILED = "failed"
+
+    sandbox = models.ForeignKey(Sandbox, related_name="video_jobs", on_delete=models.CASCADE)
+    topic_ids = models.JSONField(default=list)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.QUEUED)
+    video = models.FileField(upload_to="videos/", blank=True)
+    error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
