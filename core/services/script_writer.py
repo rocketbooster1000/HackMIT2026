@@ -7,11 +7,16 @@ prerequisite names for context) and returns a validated script:
         "title": "...",
         "scenes": [{"title": ..., "narration": ...,
                      "on_screen_text": ["bullet", ...],
+                     "visual": "advisory scene description",
+                     "keywords": [{"term": ..., "icon": "Dna" | null}, ...],
+                     "layout": "definition" | "process" | "recap",
+                     "assumption": "..." | null,
                      "duration_hint": seconds}, ...],
     }
 
 `duration_hint` is advisory only — real scene timing comes from the TTS
-audio length in the pipeline.
+audio length in the pipeline. `visual` is advisory too: it describes the
+ideal on-screen content for future renderers but is never shown.
 
 Follows the same strict-JSON-schema approach as `graph_builder.py`.
 
@@ -34,6 +39,13 @@ _MAX_TITLE = 120
 _MAX_NARRATION = 1200
 _MAX_BULLETS = 5
 _MAX_BULLET_LEN = 90
+_MAX_KEYWORDS = 5
+_MAX_KEYWORD_LEN = 40
+_MAX_ICON_LEN = 60
+_MAX_VISUAL = 300
+_MAX_ASSUMPTION = 200
+_LAYOUTS = {"definition", "process", "recap"}
+_DEFAULT_LAYOUT = "definition"
 _DEFAULT_MODEL = "gpt-4o-mini"
 
 _SCHEMA = {
@@ -63,12 +75,51 @@ _SCHEMA = {
                             "description": "short bullets shown on screen, "
                                            "max 10 words each",
                         },
+                        "visual": {
+                            "type": "string",
+                            "description": "plain-English description of the "
+                                           "ideal on-screen content; advisory "
+                                           "only, never shown to the viewer",
+                        },
+                        "keywords": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "term": {"type": "string"},
+                                    "icon": {
+                                        "type": ["string", "null"],
+                                        "description": "lucide icon name when "
+                                                       "confident, else null",
+                                    },
+                                },
+                                "required": ["term", "icon"],
+                                "additionalProperties": False,
+                            },
+                            "description": "2-5 key terms driving icon/asset "
+                                           "selection for this scene",
+                        },
+                        "layout": {
+                            "type": "string",
+                            "enum": ["definition", "process", "recap"],
+                            "description": "definition: introduce a term; "
+                                           "process: steps/mechanism flow; "
+                                           "recap: closing summary",
+                        },
+                        "assumption": {
+                            "type": ["string", "null"],
+                            "description": "one short sentence flagging a "
+                                           "simplification or uncertain claim, "
+                                           "else null",
+                        },
                         "duration_hint": {
                             "type": "number",
                             "description": "estimated narration seconds",
                         },
                     },
-                    "required": ["title", "narration", "on_screen_text", "duration_hint"],
+                    "required": ["title", "narration", "on_screen_text",
+                                 "visual", "keywords", "layout", "assumption",
+                                 "duration_hint"],
                     "additionalProperties": False,
                 },
             },
@@ -79,26 +130,51 @@ _SCHEMA = {
 }
 
 _SYSTEM_PROMPT = """\
-You write scripts for short educational videos that explain course topics
-to a student reviewing their knowledge map.
+You are a script generator for an automated educational video pipeline.
+You write scripts for short educational videos that explain course
+topics to a student reviewing their knowledge map.
 
 You are given the selected topics (name, description, tags) plus their
 prerequisite topics for context. Produce a single coherent video.
 
-Rules:
-- 3-6 scenes. If the source material is thin, use fewer scenes rather than
-  padding. Never exceed 8 scenes.
-- Keep the whole video under ~90 seconds of narration.
-- Scene 1 introduces what the video covers; the last scene recaps the key
-  takeaway. Middle scenes teach one idea each, in a sensible learning
-  order (prerequisites first).
-- narration: spoken aloud verbatim — conversational, no markdown, no
-  headers, no "scene" labels, no visual directions.
-- on_screen_text: 1-4 bullets per scene reinforcing (not repeating
-  verbatim) the narration. Max 10 words per bullet.
-- duration_hint: your estimate of how long the narration takes to speak.
-- Teach at the depth the course descriptions imply; use standard subject
-  knowledge to flesh out terse descriptions, but stay on-topic."""
+Scene rules:
+- 3-6 scenes, never more than 8. If the source material is thin, use
+  fewer scenes rather than padding. Keep total narration under ~90
+  seconds.
+- Order scenes definition -> mechanism -> significance unless the
+  topic's keywords imply otherwise. Scene 1 states what the video
+  covers; the last scene recaps the key takeaway. Middle scenes teach
+  one idea each, in a sensible learning order (prerequisites first).
+- If two selected topics overlap in scope, merge the shared material
+  into one scene — never repeat content.
+
+Per scene:
+- title: short scene heading.
+- narration: 1-3 sentences spoken aloud verbatim by TTS. One idea per
+  sentence, conversational, no markdown, no headers, no scene labels,
+  no visual directions.
+- on_screen_text: 1-4 bullets of visible overlay text reinforcing (not
+  repeating verbatim) the narration. Max 10 words per bullet.
+- visual: plain-English description of the ideal on-screen content,
+  specific enough to build without follow-up questions. Advisory only —
+  it is never shown to the viewer.
+- keywords: 2-5 key terms driving icon selection, each {"term", "icon"}.
+  Set icon to a lucide icon name only when confident (e.g. "Dna",
+  "Sigma", "FlaskConical"); otherwise null. Reuse identical term and
+  icon names across scenes so recurring concepts render identically.
+- layout: "definition" to introduce a term, "process" for steps or a
+  mechanism, "recap" for the closing summary.
+- assumption: one short sentence flagging any simplification or
+  uncertain claim; null when nothing needs flagging.
+- duration_hint: estimated narration seconds, based on ~150 words/min
+  plus one beat per visual transition.
+
+When a topic builds on a listed prerequisite topic, the narration may
+reference it by name for continuity (e.g. "as shown in
+Transcription...").
+
+Teach at the depth the course descriptions imply; use standard subject
+knowledge to flesh out terse descriptions, but stay on-topic."""
 
 
 # --------------------------------------------------------------------------
@@ -120,6 +196,26 @@ def _topics_text(topics, prerequisites_of) -> str:
     return "\n".join(lines)
 
 
+def _keywords(raw) -> list:
+    """Normalize keyword entries to [{"term", "icon"}], deduped, capped."""
+    seen, out = set(), []
+    for item in raw or []:
+        if isinstance(item, dict):
+            term, icon = item.get("term"), item.get("icon")
+        else:  # tolerate bare strings
+            term, icon = item, None
+        term = str(term or "").strip()[:_MAX_KEYWORD_LEN]
+        key = term.lower()
+        if not term or key in seen:
+            continue
+        seen.add(key)
+        icon = str(icon).strip()[:_MAX_ICON_LEN] if icon else None
+        out.append({"term": term, "icon": icon or None})
+        if len(out) >= _MAX_KEYWORDS:
+            break
+    return out
+
+
 def _validate(payload: dict) -> dict:
     scenes = []
     for raw in payload.get("scenes") or []:
@@ -131,6 +227,10 @@ def _validate(payload: dict) -> dict:
             for b in raw.get("on_screen_text") or []
             if str(b).strip()
         ][: _MAX_BULLETS]
+        layout = str(raw.get("layout") or "").strip().lower()
+        if layout not in _LAYOUTS:
+            layout = _DEFAULT_LAYOUT
+        assumption = str(raw.get("assumption") or "").strip()[:_MAX_ASSUMPTION]
         try:
             hint = float(raw.get("duration_hint") or 0)
         except (TypeError, ValueError):
@@ -139,6 +239,10 @@ def _validate(payload: dict) -> dict:
             "title": str(raw.get("title") or "").strip()[:_MAX_TITLE] or f"Scene {len(scenes) + 1}",
             "narration": narration[:_MAX_NARRATION],
             "on_screen_text": bullets,
+            "visual": str(raw.get("visual") or "").strip()[:_MAX_VISUAL],
+            "keywords": _keywords(raw.get("keywords")),
+            "layout": layout,
+            "assumption": assumption or None,
             "duration_hint": max(0.0, hint),
         })
     if not scenes:

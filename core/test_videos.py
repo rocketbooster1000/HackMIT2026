@@ -28,6 +28,10 @@ class ScriptWriterTests(TestCase):
                     "title": "Intro",
                     "narration": "Let's talk about limits.",
                     "on_screen_text": ["What is a limit?", "Why it matters"],
+                    "visual": "A curve approaching a point on the x-axis",
+                    "keywords": [{"term": "Limit", "icon": "Sigma"}],
+                    "layout": "definition",
+                    "assumption": None,
                     "duration_hint": 6.5,
                 },
                 {
@@ -47,6 +51,47 @@ class ScriptWriterTests(TestCase):
         self.assertEqual(script["title"], "Limits and Derivatives")
         self.assertEqual(len(script["scenes"]), 1)
         self.assertEqual(script["scenes"][0]["duration_hint"], 6.5)
+
+    @patch("core.services.script_writer._call")
+    def test_validate_normalizes_rich_fields(self, call):
+        payload = self._payload()
+        scene = payload["scenes"][0]
+        scene["keywords"] = [
+            {"term": "Limit", "icon": "Sigma"},
+            {"term": "limit", "icon": None},  # case-insensitive dup
+            "epsilon",                         # bare string tolerated
+            *[{"term": f"k{i}", "icon": None} for i in range(5)],
+        ]
+        scene["layout"] = "sideways"  # unknown -> default
+        scene["assumption"] = ""      # empty -> None
+        call.return_value = payload
+        _, topics = _sandbox_with_topics()
+        scene = script_writer.write_script(topics)["scenes"][0]
+        self.assertEqual(scene["layout"], "definition")
+        self.assertIsNone(scene["assumption"])
+        self.assertEqual(
+            [k["term"] for k in scene["keywords"]],
+            ["Limit", "epsilon", "k0", "k1", "k2"],  # deduped, capped at 5
+        )
+        self.assertEqual(scene["keywords"][0]["icon"], "Sigma")
+        self.assertIsNone(scene["keywords"][2]["icon"])
+
+    @patch("core.services.script_writer._call")
+    def test_validate_defaults_missing_rich_fields(self, call):
+        payload = self._payload()
+        payload["scenes"] = [{
+            "narration": "Only narration.", "on_screen_text": [],
+            "duration_hint": 4,
+        }]
+        call.return_value = payload
+        _, topics = _sandbox_with_topics()
+        scene = script_writer.write_script(topics)["scenes"][0]
+        self.assertEqual(
+            scene,
+            {"title": "Scene 1", "narration": "Only narration.",
+             "on_screen_text": [], "visual": "", "keywords": [],
+             "layout": "definition", "assumption": None, "duration_hint": 4.0},
+        )
 
     @patch("core.services.script_writer._call")
     def test_retries_once_on_invalid_output(self, call):
@@ -162,6 +207,8 @@ class PipelineIntegrationTests(TestCase):
             "scenes": [{
                 "title": "Intro", "narration": "Hi.",
                 "on_screen_text": ["a"], "duration_hint": 5.0,
+                "keywords": [{"term": "Limit", "icon": "Sigma"}],
+                "layout": "process", "visual": "arrow", "assumption": None,
             }],
         }
         synthesize.return_value = 4.0
@@ -169,7 +216,12 @@ class PipelineIntegrationTests(TestCase):
         def fake_render(props, job_id):
             import tempfile
             from pathlib import Path
-            self.assertEqual(props["scenes"][0]["durationInFrames"], 120)
+            scene = props["scenes"][0]
+            self.assertEqual(scene["durationInFrames"], 120)
+            self.assertEqual(scene["layout"], "process")
+            self.assertEqual(scene["keywords"], [{"term": "Limit", "icon": "Sigma"}])
+            self.assertEqual(scene["visual"], "arrow")
+            self.assertIsNone(scene["assumption"])
             out = Path(tempfile.mkdtemp()) / f"{job_id}.mp4"
             out.write_bytes(b"fake-mp4")
             return out

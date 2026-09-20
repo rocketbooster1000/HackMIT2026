@@ -47,7 +47,8 @@ def render_video(props: dict, job_id: Union[int, str]) -> Path:
     """Render ``props`` and return the path to the finished mp4.
 
     ``props`` must contain ``scenes`` with per-scene ``title``, ``bullets``,
-    ``audio`` (absolute path to an mp3) and ``durationInFrames``. Audio is
+    ``keywords``, ``layout``, ``assumption``, ``audio`` (absolute path to
+    an mp3) and ``durationInFrames``. Audio is
     copied into ``video-service/public/jobs/<job_id>/`` so the composition
     can resolve it with ``staticFile``.
     """
@@ -68,6 +69,10 @@ def render_video(props: dict, job_id: Union[int, str]) -> Path:
         scenes.append({
             "title": scene.get("title") or f"Scene {i + 1}",
             "bullets": scene.get("bullets") or [],
+            "keywords": scene.get("keywords") or [],
+            "layout": scene.get("layout") or "definition",
+            "visual": scene.get("visual") or "",
+            "assumption": scene.get("assumption"),
             "audio": f"jobs/{job_id}/{audio_name}",
             "durationInFrames": int(scene["durationInFrames"]),
         })

@@ -37,16 +37,23 @@ Stages:
 
 - **Script** (`core/services/script_writer.py`) — OpenAI strict JSON schema
   call producing `{ title, scenes: [{ title, narration, on_screen_text,
-  duration_hint }] }`. Retries once on malformed output or transient API
-  errors. Source material is topic name + description + tags, with
-  prerequisite names for context. Multiple selected topics merge into one
-  video.
+  visual, keywords: [{term, icon}], layout, assumption, duration_hint }] }`.
+  `layout` is one of `definition`/`process`/`recap` and picks the scene
+  variant; `keywords` drive icon chips (optional lucide icon name per
+  term); `visual` is an advisory build description that is never shown;
+  `assumption` flags simplifications as an on-screen footnote. Retries
+  once on malformed output or transient API errors. Source material is
+  topic name + description + tags, with prerequisite names for context.
+  Multiple selected topics merge into one video.
 - **Audio** (`core/services/tts.py`) — edge-tts per scene; real durations
   come from `WordBoundary` metadata, `duration_hint` is only a fallback.
 - **Render** (`core/services/remotion_renderer.py`) — copies audio into
   `video-service/public/jobs/<id>/`, writes `props.json`, and invokes
   `node render.mjs` as a subprocess. `video-service/` is a minimal Remotion
-  project (`Video` composition: per-scene title + bullets + `<Audio>`).
+  project (`Video` composition): per-scene layout variants with spring
+  entrances, staggered bullets, keyword icon chips (lucide-react;
+  LLM-suggested icon → keyword map → fallback), deterministic per-keyword
+  accent colors for cross-video motif consistency, and an exit fade.
 
 ### Env vars (see `.env.example`)
 
