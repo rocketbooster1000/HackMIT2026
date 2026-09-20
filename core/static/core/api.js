@@ -20,6 +20,7 @@
     createNode: (sandboxId, data) => request(`sandboxes/${sandboxId}/topics/`, {method: 'POST', body: JSON.stringify(data)}),
     updateNode: (id, data) => request(`topics/${id}/`, {method: 'PATCH', body: JSON.stringify(data)}),
     deleteNode: id => request(`topics/${id}/`, {method: 'DELETE'}),
+    generateQuiz: id => request(`topics/${id}/quiz/`, {method: 'POST'}),
     getTags: () => request('tags/'),
     createTag: name => request('tags/', {method: 'POST', body: JSON.stringify({name})}),
     applyTag: (sandboxId, tagId, topicIds) => request(`sandboxes/${sandboxId}/tags/`, {method: 'POST', body: JSON.stringify({tag_id: tagId, topic_ids: topicIds})}),
