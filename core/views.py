@@ -1,4 +1,5 @@
 import json
+import math
 from pathlib import Path
 
 from django.db import transaction
@@ -33,7 +34,26 @@ def _topic_data(topic):
         "tag_ids": list(topic.tags.values_list("id", flat=True)),
         "documents": [{"id": doc.id, "name": doc.name} for doc in topic.documents.all()],
         "order": topic.order,
+        "x": topic.x,
+        "y": topic.y,
     }
+
+
+def _default_position(order):
+    index = max(order - 1, 0)
+    return {
+        "x": 230 + (index % 3) * 270,
+        "y": 105 + (index // 3) * 145,
+    }
+
+
+def _coordinates(data, fallback):
+    x, y = data.get("x", fallback["x"]), data.get("y", fallback["y"])
+    try:
+        x, y = float(x), float(y)
+    except (TypeError, ValueError):
+        return None
+    return (x, y) if math.isfinite(x) and math.isfinite(y) else None
 
 
 def _sandbox_data(sandbox):
@@ -113,11 +133,17 @@ def sandbox_topics(request, sandbox_id):
     tags = list(Tag.objects.filter(id__in=tag_ids))
     if len(tags) != len(set(tag_ids)):
         return _error("One or more tags do not exist.")
+    order = sandbox.topics.count() + 1
+    coordinates = _coordinates(data, _default_position(order))
+    if coordinates is None:
+        return _error("Node coordinates must be valid numbers.")
     topic = Topic.objects.create(
         sandbox=sandbox,
         name=name[:120],
         description=str(data.get("description") or "")[:2000],
-        order=sandbox.topics.count() + 1,
+        order=order,
+        x=coordinates[0],
+        y=coordinates[1],
     )
     topic.tags.set(tags)
     return JsonResponse({"topic": _topic_data(topic)}, status=201)
@@ -130,17 +156,31 @@ def topic_detail(request, topic_id):
         topic.delete()
         return JsonResponse({"ok": True})
     data = _body(request)
-    name = str(data.get("name") or "").strip()
-    if not name:
-        return _error("A topic name is required.")
-    tag_ids = data.get("tag_ids", [])
-    tags = list(Tag.objects.filter(id__in=tag_ids))
-    if len(tags) != len(set(tag_ids)):
-        return _error("One or more tags do not exist.")
-    topic.name = name[:120]
-    topic.description = str(data.get("description") or "")[:2000]
-    topic.save(update_fields=["name", "description"])
-    topic.tags.set(tags)
+    update_fields = []
+    if "name" in data:
+        name = str(data.get("name") or "").strip()
+        if not name:
+            return _error("A topic name is required.")
+        topic.name = name[:120]
+        topic.description = str(data.get("description") or "")[:2000]
+        update_fields.extend(["name", "description"])
+    if "x" in data or "y" in data:
+        fallback = {"x": topic.x, "y": topic.y}
+        if fallback["x"] is None or fallback["y"] is None:
+            fallback = _default_position(topic.order)
+        coordinates = _coordinates(data, fallback)
+        if coordinates is None:
+            return _error("Node coordinates must be valid numbers.")
+        topic.x, topic.y = coordinates
+        update_fields.extend(["x", "y"])
+    if update_fields:
+        topic.save(update_fields=update_fields)
+    if "tag_ids" in data:
+        tag_ids = data["tag_ids"]
+        tags = list(Tag.objects.filter(id__in=tag_ids))
+        if len(tags) != len(set(tag_ids)):
+            return _error("One or more tags do not exist.")
+        topic.tags.set(tags)
     return JsonResponse({"topic": _topic_data(topic)})
 
 
@@ -227,9 +267,10 @@ def syllabus(request, sandbox_id):
         sandbox.save(update_fields=["syllabus", "updated_at"])
         sandbox.topics.all().delete()
         topics = []
-        for item in graph["nodes"]:
+        for index, item in enumerate(graph["nodes"], start=1):
+            position = _default_position(item.get("order") or index)
             topics.append(Topic.objects.create(
-                sandbox=sandbox, name=item["title"], description=item.get("summary") or "", order=item.get("order") or 0,
+                sandbox=sandbox, name=item["title"], description=item.get("summary") or "", order=item.get("order") or 0, x=position["x"], y=position["y"],
             ))
         by_graph_id = {item["id"]: topic for item, topic in zip(graph["nodes"], topics)}
         Prerequisite.objects.bulk_create([
