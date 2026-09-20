@@ -40,6 +40,47 @@ def _topic_data(topic):
     }
 
 
+def _prerequisite_context(topic):
+    """Return prerequisite ancestors once, nearest topics first."""
+    result, seen, pending = [], {topic.id}, [topic]
+    while pending:
+        current = pending.pop(0)
+        for edge in current.requires.select_related("prerequisite").all():
+            prerequisite = edge.prerequisite
+            if prerequisite.id in seen:
+                continue
+            seen.add(prerequisite.id)
+            result.append({"id": prerequisite.id, "name": prerequisite.name, "description": prerequisite.description})
+            pending.append(prerequisite)
+    return result
+
+
+def _document_context(topic):
+    """Use associated document text when it can be safely extracted."""
+    from .services.syllabus_parser import parse_syllabus_docx, parse_syllabus_pdf
+
+    documents, remaining = [], 8000
+    for document in topic.documents.all():
+        item = {"id": document.id, "name": document.name}
+        suffix = Path(document.name).suffix.lower()
+        if remaining and suffix in ALLOWED_UPLOAD_SUFFIXES:
+            try:
+                document.file.open("rb")
+                parser = parse_syllabus_pdf if suffix == ".pdf" else parse_syllabus_docx
+                text = parser(document.file).strip()
+                document.file.close()
+                if text:
+                    item["text"] = text[:remaining]
+                    remaining -= len(item["text"])
+            except Exception:
+                try:
+                    document.file.close()
+                except Exception:
+                    pass
+        documents.append(item)
+    return documents
+
+
 def _default_position(order):
     index = max(order - 1, 0)
     return {
@@ -202,6 +243,17 @@ def topic_detail(request, topic_id):
             return _error("One or more tags do not exist.")
         topic.tags.set(tags)
     return JsonResponse({"topic": _topic_data(topic)})
+
+
+@require_http_methods(["POST"])
+def topic_quiz(request, topic_id):
+    topic = get_object_or_404(Topic.objects.prefetch_related("documents"), pk=topic_id)
+    try:
+        from .services.quiz_generator import generate_quiz
+        quiz = generate_quiz(topic=topic, prerequisites=_prerequisite_context(topic), documents=_document_context(topic))
+    except Exception:
+        return _error("Unable to generate quiz. Please try again.", status=422)
+    return JsonResponse({"quiz": {"topic": {"id": topic.id, "name": topic.name}, "questions": quiz["questions"]}})
 
 
 @require_http_methods(["GET", "POST"])

@@ -12,11 +12,11 @@
   function retainSelectedNodes() { state.selected = new Set([...state.selected].filter(id => nodeById(id))); state.selectionOrder = state.selectionOrder.filter(id => state.selected.has(String(id))); }
   const tagById = id => state.tags.find(tag => String(tag.id) === String(id));
   const hasTagId = (node, id) => (node.tag_ids || []).some(tagId => String(tagId) === String(id));
-  const NODE_WIDTH = 230, NODE_SIDE_PADDING = 18, NODE_TITLE_LINE_HEIGHT = 17, NODE_STAR_ROW_HEIGHT = 24, NODE_MIN_HEIGHT = 68, NODE_LAYER_GAP = 92, NODE_COLUMN_GAP = 72;
+  const NODE_WIDTH = 230, NODE_SIDE_PADDING = 18, NODE_TITLE_LINE_HEIGHT = 20, NODE_STAR_ROW_HEIGHT = 31, NODE_MIN_HEIGHT = 104, NODE_LAYER_GAP = 92, NODE_COLUMN_GAP = 72;
   const titleMeasure = document.createElement('canvas').getContext('2d');
 
   function wrapTitle(title) {
-    titleMeasure.font = '600 14px Manrope, sans-serif';
+    titleMeasure.font = '700 15px Manrope, sans-serif';
     const maxWidth = NODE_WIDTH - NODE_SIDE_PADDING * 2, lines = [];
     let line = '';
     String(title || '').trim().split(/\s+/).filter(Boolean).forEach(word => {
@@ -43,7 +43,7 @@
   }
   function nodeGeometry(node) {
     const titleLines = wrapTitle(node.name);
-    return {width: NODE_WIDTH, height: Math.max(NODE_MIN_HEIGHT, 33 + titleLines.length * NODE_TITLE_LINE_HEIGHT + NODE_STAR_ROW_HEIGHT + 18), titleLines};
+    return {width: NODE_WIDTH, height: Math.max(NODE_MIN_HEIGHT, 36 + titleLines.length * NODE_TITLE_LINE_HEIGHT + NODE_STAR_ROW_HEIGHT + 18), titleLines};
   }
   const defaultPosition = (node, index) => {
     const order = Number(node.order) > 0 ? Number(node.order) : index + 1, position = Math.max(order - 1, 0);
@@ -194,7 +194,7 @@
     viewport.setAttribute('transform', `translate(${state.transform.x} ${state.transform.y}) scale(${state.transform.scale})`);
     const positions = new Map(positioned.map(node => [String(node.id), node]));
     const edges = state.graph.edges.filter(edge => visibleIds.has(String(edge.prerequisite)) && visibleIds.has(String(edge.topic))).map(edge => { const source = positions.get(String(edge.prerequisite)), target = positions.get(String(edge.topic)), points = edgeEndpoints(source, target); return `<line class="edge" x1="${points.x1}" y1="${points.y1}" x2="${points.x2}" y2="${points.y2}" marker-end="url(#arrow)"/>`; }).join('');
-    const nodeMarkup = positioned.map(node => { const title = node.titleLines.map((line, index) => `<tspan x="${node.width / 2}" y="${24 + index * NODE_TITLE_LINE_HEIGHT}">${escape(line)}</tspan>`).join(''); const confidence = Math.max(0, Math.min(5, Number(node.confidence) || 0)), starsY = 24 + node.titleLines.length * NODE_TITLE_LINE_HEIGHT + 7, stars = Array.from({length: 5}, (_, index) => `<text class="confidence-star ${index < confidence ? 'filled' : ''}" data-confidence="${index + 1}" data-confidence-node="${node.id}" x="${node.width / 2 + (index - 2) * 20}" y="${starsY}" text-anchor="middle">${index < confidence ? '★' : '☆'}</text>`).join(''); return `<g class="node-group ${state.selected.has(String(node.id)) ? 'selected' : ''}" data-node="${node.id}" transform="translate(${node.x - node.width / 2} ${node.y - node.height / 2})"><rect class="node-bg" width="${node.width}" height="${node.height}" rx="14"/><text class="node-title" text-anchor="middle">${title}</text><g class="confidence-stars">${stars}</g><text class="node-tag" x="${node.width / 2}" y="${node.height - 13}" text-anchor="middle">${escape(node.tags.slice(0, 2).join(' · ') || 'Untagged')}</text></g>`; }).join('');
+    const nodeMarkup = positioned.map(node => { const title = node.titleLines.map((line, index) => `<tspan x="${node.width / 2}" y="${27 + index * NODE_TITLE_LINE_HEIGHT}">${escape(line)}</tspan>`).join(''); const confidence = Math.max(0, Math.min(5, Number(node.confidence) || 0)), starsY = 27 + node.titleLines.length * NODE_TITLE_LINE_HEIGHT + 9, stars = Array.from({length: 5}, (_, index) => `<text class="confidence-star ${index < confidence ? 'filled' : ''}" data-confidence="${index + 1}" data-confidence-node="${node.id}" x="${node.width / 2 + (index - 2) * 24}" y="${starsY}" text-anchor="middle">${index < confidence ? '★' : '☆'}</text>`).join(''); return `<g class="node-group ${state.selected.has(String(node.id)) ? 'selected' : ''}" data-node="${node.id}" transform="translate(${node.x - node.width / 2} ${node.y - node.height / 2})"><rect class="node-bg" width="${node.width}" height="${node.height}" rx="14"/><text class="node-title" text-anchor="middle">${title}</text><g class="confidence-stars">${stars}</g><text class="node-tag" x="${node.width / 2}" y="${node.height - 15}" text-anchor="middle">${escape(node.tags.slice(0, 2).join(' · ') || 'Untagged')}</text></g>`; }).join('');
     viewport.innerHTML = edges + nodeMarkup;
   }
   function renderSelection() { const count = state.selected.size, connect = $('#connectNodes'); $('#selectionBar').classList.toggle('hidden', count < 2); connect.classList.toggle('hidden', count !== 2); connect.disabled = state.connecting; $('#selectionCount').textContent = `${count} topics selected`; }
@@ -212,6 +212,39 @@
   function selectNode(id, event) { id = String(id); if (event.shiftKey) { if (state.selected.has(id)) { state.selected.delete(id); state.selectionOrder = state.selectionOrder.filter(selectedId => selectedId !== id); } else { state.selected.add(id); state.selectionOrder.push(id); } } else { state.selected = new Set([id]); state.selectionOrder = [id]; } render(); }
   function openModal(content) { $('#modalContent').innerHTML = content; $('#modalBackdrop').classList.remove('hidden'); if (window.lucide) window.lucide.createIcons({attrs: {'stroke-width': 1.9}}); }
   function closeModal() { $('#modalBackdrop').classList.add('hidden'); }
+
+  function quizModal() {
+    const topic = selectedNodes().length === 1 ? selectedNodes()[0] : null;
+    if (!topic) return showError('Select one topic before generating a quiz.');
+    openModal(`<h2>Generating quiz</h2><p class="sub">Creating a five-question quiz for ${escape(topic.name)}.</p><div class="quiz-loading"><div class="quiz-spinner" aria-label="Generating quiz"></div><span class="sub">Using your topic, prerequisites, and study materials...</span></div>`);
+    workspaceApi.generateQuiz(topic.id).then(({quiz}) => {
+      if (!quiz || !Array.isArray(quiz.questions) || quiz.questions.length !== 5) throw new Error('The generated quiz was incomplete.');
+      runQuiz(topic, quiz.questions);
+    }).catch(() => showError('Unable to generate quiz. Please try again.'));
+  }
+
+  function runQuiz(topic, questions) {
+    const quiz = {topic, questions, index: 0, answer: null, submitted: false, score: 0};
+    const renderQuestion = () => {
+      const item = quiz.questions[quiz.index], answered = quiz.submitted;
+      const options = item.options.map((option, index) => {
+        const selected = quiz.answer === index;
+        const result = answered ? (index === item.correct_answer ? 'correct' : selected ? 'incorrect' : '') : selected ? 'selected' : '';
+        return `<button type="button" class="quiz-option ${result}" data-quiz-option="${index}" ${answered ? 'disabled' : ''}><span class="quiz-option-letter">${String.fromCharCode(65 + index)}</span><span>${escape(option)}</span></button>`;
+      }).join('');
+      const feedback = answered ? `<div class="quiz-feedback"><strong>${quiz.answer === item.correct_answer ? 'Correct.' : 'Not quite.'}</strong> ${escape(item.explanation)}</div>` : '';
+      openModal(`<h2>${escape(topic.name)} quiz</h2><div class="quiz-meta"><span>Question ${quiz.index + 1} of ${quiz.questions.length}</span><span>${quiz.score} correct</span></div><div class="quiz-progress"><i style="width: ${((quiz.index + 1) / quiz.questions.length) * 100}%"></i></div><p class="quiz-question">${escape(item.question)}</p><div class="quiz-options">${options}</div>${feedback}<div class="modal-actions"><button class="soft-button" data-close-modal>Close</button>${answered ? `<button class="primary-button" id="quizNext">${quiz.index === quiz.questions.length - 1 ? 'See results' : 'Next question'}</button>` : `<button class="primary-button" id="quizSubmit" ${quiz.answer === null ? 'disabled' : ''}>Submit answer</button>`}</div>`);
+      document.querySelectorAll('[data-quiz-option]').forEach(button => button.addEventListener('click', () => { quiz.answer = Number(button.dataset.quizOption); renderQuestion(); }));
+      $('#quizSubmit')?.addEventListener('click', () => { if (quiz.answer === null) return; quiz.submitted = true; if (quiz.answer === item.correct_answer) quiz.score += 1; renderQuestion(); });
+      $('#quizNext')?.addEventListener('click', () => { if (quiz.index === quiz.questions.length - 1) renderResults(); else { quiz.index += 1; quiz.answer = null; quiz.submitted = false; renderQuestion(); } });
+    };
+    const renderResults = () => {
+      const percent = Math.round((quiz.score / quiz.questions.length) * 100);
+      openModal(`<h2>Quiz complete</h2><div class="quiz-score"><div class="detail-kicker">${escape(topic.name)}</div><div class="quiz-score-number">${quiz.score}<span> / ${quiz.questions.length}</span></div><p>${percent}% correct. Review the explanations, then try again when you are ready.</p></div><div class="modal-actions"><button class="soft-button" data-close-modal>Done</button><button class="primary-button" id="quizRetry"><i data-lucide="rotate-ccw"></i>Try again</button></div>`);
+      $('#quizRetry').addEventListener('click', () => { quiz.index = 0; quiz.answer = null; quiz.submitted = false; quiz.score = 0; renderQuestion(); });
+    };
+    renderQuestion();
+  }
 
   const topicFields = (node = {name: '', description: '', tag_ids: []}, includeTags = true) => `<div class="field"><label for="topicName">Topic name</label><input id="topicName" value="${escape(node.name)}" placeholder="e.g. Related rates" autofocus></div><div class="field"><label for="topicDescription">Description</label><textarea id="topicDescription" placeholder="What should a student understand?">${escape(node.description)}</textarea></div>${includeTags ? `<div class="field"><label>Tags</label><div class="modal-tags">${state.tags.map(tag => `<button type="button" class="tag-toggle ${hasTagId(node, tag.id) ? 'active' : ''}" data-tag="${tag.id}">${escape(tag.name)}</button>`).join('')}<button type="button" class="new-tag-button" data-create-tag="topic-create"><i data-lucide="plus"></i>New tag</button></div></div>` : ''}`;
   function draftTopic() { return {name: $('#topicName')?.value || '', description: $('#topicDescription')?.value || '', tag_ids: [...document.querySelectorAll('.tag-toggle.active')].map(button => Number(button.dataset.tag))}; }
@@ -255,7 +288,7 @@
     const action = event.target.closest('[data-action]')?.dataset.action; if (action === 'node' && active()) createNodeModal(); if (action === 'document' && active()) documentModal(); if (action === 'syllabus' && active()) syllabusModal();
     if (event.target.closest('#addButton')) $('#addMenu').classList.toggle('hidden'); if (event.target.closest('#filterButton')) $('#filterMenu').classList.toggle('hidden'); if (event.target.closest('#focusMode')) { if (state.focusMode) { state.focusMode = false; state.focusNodes.clear(); render(); } else { const focusNodes = new Set(selectedNodes().map(node => String(node.id))); if (!focusNodes.size) return showError('Select one or more topics before enabling Focus Mode.'); state.focusNodes = focusNodes; state.focusMode = true; render(); } }
     if (event.target.closest('#profileArea') && !event.target.closest('#profileMenu')) { const menu = $('#profileMenu'), hidden = menu.classList.toggle('hidden'); $('#profileArea').setAttribute('aria-expanded', String(!hidden)); }
-    if (event.target.closest('#bulkTag') || event.target.closest('#addTagToNode')) tagModal(state.selected); if (event.target.closest('#deleteNode') || event.target.closest('#deleteNodes')) deleteNodesModal(); if (event.target.closest('#clearSelection') || event.target.closest('#closePanel')) { clearSelection(); render(); }
+    if (event.target.closest('#generateQuiz')) quizModal(); if (event.target.closest('#bulkTag') || event.target.closest('#addTagToNode')) tagModal(state.selected); if (event.target.closest('#deleteNode') || event.target.closest('#deleteNodes')) deleteNodesModal(); if (event.target.closest('#clearSelection') || event.target.closest('#closePanel')) { clearSelection(); render(); }
     if (event.target.closest('#connectNodes')) { const selected = orderedSelectedNodes(); if (state.connecting || selected.length !== 2 || !state.activeId) return showError('Select exactly two topics before connecting them.'); const [prerequisite, topic] = selected; if (prerequisite.id === topic.id) return showError('Choose two different topics to create a connection.'); if (state.graph.edges.some(edge => String(edge.prerequisite) === String(prerequisite.id) && String(edge.topic) === String(topic.id))) return showError('This prerequisite connection already exists.'); state.connecting = true; renderSelection(); workspaceApi.createPrerequisite(state.activeId, prerequisite.id, topic.id).then(({edge}) => { if (!state.graph.edges.some(item => String(item.prerequisite) === String(edge.prerequisite) && String(item.topic) === String(edge.topic))) state.graph.edges.push(edge); render(); }).catch(error => showError(error.message)).finally(() => { state.connecting = false; renderSelection(); }); }
     if (event.target.closest('#editNode')) createNodeModal(true);
     if (event.target.closest('#newSandbox')) workspaceApi.createSandbox(`New Sandbox ${state.sandboxes.length + 1}`).then(({sandbox}) => loadSandboxes(sandbox.id)).catch(error => showError(error.message));

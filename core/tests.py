@@ -146,6 +146,40 @@ class WorkspaceApiTests(TestCase):
             self.assertFalse(os.path.exists(path))
             self.assertEqual(Topic.objects.get(pk=topic["id"]).documents.count(), 0)
 
+    @patch("core.services.quiz_generator.generate_quiz")
+    def test_topic_quiz_uses_topic_context_and_returns_five_questions(self, generate_quiz):
+        sandbox = self.post_json("/api/sandboxes/", {"name": "Calculus"}).json()["sandbox"]
+        prerequisite = self.post_json(
+            f"/api/sandboxes/{sandbox['id']}/topics/", {"name": "Limits", "description": "Function behavior."}
+        ).json()["topic"]
+        topic = self.post_json(
+            f"/api/sandboxes/{sandbox['id']}/topics/", {"name": "Derivatives", "description": "Rates of change."}
+        ).json()["topic"]
+        self.post_json(
+            f"/api/sandboxes/{sandbox['id']}/prerequisites/", {"prerequisite": prerequisite["id"], "topic": topic["id"]}
+        )
+        generate_quiz.return_value = {"questions": [
+            {"question": f"Question {index}", "type": "multiple_choice", "options": ["A", "B", "C", "D"], "correct_answer": 0, "explanation": "Because A is correct."}
+            for index in range(1, 6)
+        ]}
+
+        response = self.client.post(f"/api/topics/{topic['id']}/quiz/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["quiz"]["topic"]["name"], "Derivatives")
+        self.assertEqual(len(response.json()["quiz"]["questions"]), 5)
+        context = generate_quiz.call_args.kwargs
+        self.assertEqual(context["topic"].id, topic["id"])
+        self.assertEqual(context["prerequisites"][0]["id"], prerequisite["id"])
+
+    @patch("core.services.quiz_generator.generate_quiz", side_effect=ValueError("bad response"))
+    def test_topic_quiz_returns_a_useful_error_when_generation_fails(self, _generate_quiz):
+        sandbox = self.post_json("/api/sandboxes/", {"name": "Calculus"}).json()["sandbox"]
+        topic = self.post_json(f"/api/sandboxes/{sandbox['id']}/topics/", {"name": "Limits"}).json()["topic"]
+        response = self.client.post(f"/api/topics/{topic['id']}/quiz/")
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"], "Unable to generate quiz. Please try again.")
+
     @patch("core.services.graph_builder.build_graph")
     @patch("core.services.syllabus_parser.parse_syllabus_pdf")
     def test_syllabus_multipart_post_reaches_syllabus_view(self, parse_pdf, build_graph):
