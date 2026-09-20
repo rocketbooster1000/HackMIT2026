@@ -288,6 +288,7 @@
   document.addEventListener('click', event => {
     if (!event.target.closest('#renameWrap')) closeRenamePopover();
     if (!event.target.closest('#profileArea') && !event.target.closest('#profileMenu')) { $('#profileMenu').classList.add('hidden'); $('#profileArea').setAttribute('aria-expanded', 'false'); }
+    if (state.bankOpen && !event.target.closest('#docBankPanel') && !event.target.closest('#docBankButton')) { state.bankOpen = false; render(); }
     const deleteSandbox = event.target.closest('[data-delete-sandbox]'); if (deleteSandbox) { deleteSandboxModal(Number(deleteSandbox.dataset.deleteSandbox)); return; }
     const node = event.target.closest('[data-node]'); if (node) { if (suppressNodeClick) return; selectNode(node.dataset.node, event); return; }
     const sandbox = event.target.closest('[data-sandbox]'); if (sandbox) { state.activeId = Number(sandbox.dataset.sandbox); clearSelection(); state.filters.clear(); state.docFilters.clear(); state.confidenceFilter = null; loadGraph(state.activeId).catch(error => showError(error.message)); return; }
