@@ -1,5 +1,6 @@
 import json
 import math
+import threading
 from pathlib import Path
 
 from django.db import transaction
@@ -7,7 +8,7 @@ from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
 from django.views.decorators.http import require_http_methods
 
-from .models import Document, Prerequisite, Sandbox, Tag, Topic
+from .models import Document, Prerequisite, Sandbox, Tag, Topic, VideoJob
 
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
@@ -381,3 +382,33 @@ def syllabus(request, sandbox_id):
             for edge in graph["edges"] if edge["source"] in by_graph_id and edge["target"] in by_graph_id
         ])
     return _graph_response(sandbox)
+
+
+def _video_job_data(job):
+    return {
+        "id": job.id,
+        "status": job.status,
+        "video_url": job.video.url if job.video else None,
+        "error": job.error or None,
+    }
+
+
+@require_http_methods(["POST"])
+def generate_video(request):
+    data = _body(request)
+    sandbox = get_object_or_404(Sandbox, pk=data.get("sandbox_id"))
+    topics = _sandbox_topics(sandbox, data.get("topic_ids", []))
+    if not topics:
+        return _error("Select at least one topic from this sandbox.")
+    job = VideoJob.objects.create(
+        sandbox=sandbox, topic_ids=[topic.id for topic in topics])
+    from .services.video_pipeline import run_video_job
+    threading.Thread(target=run_video_job, args=(job.id,), daemon=True).start()
+    return JsonResponse(
+        {"job_id": job.id, "status": job.status}, status=202)
+
+
+@require_http_methods(["GET"])
+def video_job_status(request, job_id):
+    job = get_object_or_404(VideoJob, pk=job_id)
+    return JsonResponse(_video_job_data(job))

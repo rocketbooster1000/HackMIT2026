@@ -3,7 +3,8 @@
 SillyTree turns a course syllabus into an interactive knowledge map. Upload a
 PDF or DOCX syllabus and the app extracts course topics, infers prerequisite
 relationships, and lays everything out as a visual graph you can organize and
-use for studying.
+use for studying. Selected topics can also be turned into short narrated
+explainer videos.
 
 ## Features
 
@@ -16,6 +17,7 @@ use for studying.
 - Focus the graph on selected topics and their prerequisites.
 - Generate five-question study quizzes using topic, prerequisite, and uploaded
   document context.
+- Generate narrated explainer videos for selected topics.
 
 ## Tech stack
 
@@ -23,7 +25,9 @@ use for studying.
 - Django 5.2
 - SQLite
 - Vanilla JavaScript, HTML, CSS, and SVG
-- OpenAI API for topic extraction, prerequisite inference, and quizzes
+- OpenAI API for topic extraction, prerequisite inference, quizzes, and video
+  scripts
+- Remotion (Node 18+) and edge-tts for explainer video generation
 
 ### Python libraries
 
@@ -116,7 +120,14 @@ Python 3.10 or newer is recommended.
    python manage.py runserver
    ```
 
-6. Open [http://127.0.0.1:8000](http://127.0.0.1:8000) in a browser.
+6. For video generation, also install the Remotion service (requires Node 18+).
+
+   ```bash
+   cd video-service
+   npm install
+   ```
+
+7. Open [http://127.0.0.1:8000](http://127.0.0.1:8000) in a browser.
 
 ## Using the app
 
@@ -126,10 +137,56 @@ Python 3.10 or newer is recommended.
 4. Select topics to add tags, upload study materials, or create prerequisite
    connections.
 5. Rate your confidence, filter the map, and generate quizzes as you study.
+6. Select one or more topics and click **Generate video** to create a narrated
+   explainer.
 
 Uploads must be PDF or DOCX files no larger than 20 MB. Uploading a new
 syllabus replaces the existing topics and prerequisite relationships in that
 sandbox.
+
+## Video pipeline
+
+Selecting one or more topics on the map can trigger a narrated explainer
+video:
+
+1. `POST /api/videos/generate` with `{ "sandbox_id": N, "topic_ids": [...] }`
+   creates a `VideoJob` and returns `{ "job_id", "status": "queued" }`
+   immediately (202). Work runs on a background thread — no Celery needed.
+2. `GET /api/videos/jobs/<id>/` polls status:
+   `queued → generating_script → generating_audio → rendering → done|failed`.
+   When `done`, `video_url` points at `/media/videos/<id>.mp4`.
+
+Stages:
+
+- **Script** (`core/services/script_writer.py`) — OpenAI strict JSON schema
+  call producing `{ title, scenes: [{ title, narration, on_screen_text,
+  markup, assumption, duration_hint }] }`. `markup` is self-contained
+  HTML/SVG invented by the model — the scene's visual is fully
+  model-generated (sanitized: no scripts or event handlers);
+  `on_screen_text` bullets render below it as a caption strip;
+  `assumption` flags simplifications as an on-screen footnote. Retries
+  once on malformed output or transient API errors. Source material is
+  topic name + description + tags, with prerequisite names for context.
+  Multiple selected topics merge into one video.
+- **Audio** (`core/services/tts.py`) — edge-tts per scene; real durations
+  come from `WordBoundary` metadata, `duration_hint` is only a fallback.
+- **Render** (`core/services/remotion_renderer.py`) — copies audio into
+  `video-service/public/jobs/<id>/`, writes `props.json`, and invokes
+  `node render.mjs` as a subprocess. `video-service/` is a minimal Remotion
+  project (`Video` composition): the model's markup owns the full
+  1920x1080 frame per scene (CSS animations included); title + bullets
+  render only as a fallback when markup is empty, plus an assumption
+  footnote, spring entrances, and an exit fade.
+
+### Video env vars (see `.env.example`)
+
+| Var | Purpose |
+| --- | --- |
+| `OPENAI_SCRIPT_MODEL` | default `gpt-4o-mini` |
+| `EDGE_TTS_VOICE` | default `en-US-AriaNeural` |
+| `EDGE_TTS_RATE` / `EDGE_TTS_PITCH` | default `+0%` / `+0Hz` |
+| `RENDER_TIMEOUT_S` | default `300` |
+| `REMOTION_PROJECT_DIR` | default `<repo>/video-service` |
 
 ## Run the tests
 
@@ -138,20 +195,21 @@ python manage.py test
 ```
 
 The tests cover sandbox and topic operations, tags, uploads, graph generation,
-confidence ratings, and quiz responses. Calls to the OpenAI API are mocked in
-the test suite.
+confidence ratings, quiz responses, and the video pipeline. All external calls
+(OpenAI, edge-tts, the node subprocess) are mocked in the test suite.
 
 ## Project structure
 
 ```text
 my_django_app/
 ├── core/
-│   ├── services/          # Syllabus parsing, graph building, and quizzes
+│   ├── services/          # Syllabus parsing, graph building, quizzes, video
 │   ├── static/core/       # Workspace styles and browser-side behavior
 │   ├── templates/core/    # Main workspace page
 │   ├── models.py          # Sandboxes, topics, edges, tags, and documents
 │   ├── urls.py            # JSON API routes
 │   └── views.py           # API handlers
+├── video-service/         # Minimal Remotion project for video rendering
 ├── mysite/                # Django project configuration
 ├── media/                 # Local development uploads
 ├── manage.py

@@ -4,3 +4,6 @@ pycache/
 db.sqlite3
 .env
 .DS_Store
+media/videos/
+video-service/node_modules/
+video-service/public/jobs/

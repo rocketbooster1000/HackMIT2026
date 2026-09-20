@@ -203,7 +203,7 @@
     const nodeMarkup = positioned.map(node => { const title = node.titleLines.map((line, index) => `<tspan x="${node.width / 2}" y="${27 + index * NODE_TITLE_LINE_HEIGHT}">${escape(line)}</tspan>`).join(''); const confidence = Math.max(0, Math.min(5, Number(node.confidence) || 0)), starsY = 27 + node.titleLines.length * NODE_TITLE_LINE_HEIGHT + 9, stars = Array.from({length: 5}, (_, index) => `<text class="confidence-star ${index < confidence ? 'filled' : ''}" data-confidence="${index + 1}" data-confidence-node="${node.id}" x="${node.width / 2 + (index - 2) * 24}" y="${starsY}" text-anchor="middle">${index < confidence ? '★' : '☆'}</text>`).join(''); return `<g class="node-group ${state.selected.has(String(node.id)) ? 'selected' : ''}" data-node="${node.id}" transform="translate(${node.x - node.width / 2} ${node.y - node.height / 2})"><rect class="node-bg" width="${node.width}" height="${node.height}" rx="14"/><text class="node-title" text-anchor="middle">${title}</text><g class="confidence-stars">${stars}</g><text class="node-tag" x="${node.width / 2}" y="${node.height - 15}" text-anchor="middle">${escape(node.tags.slice(0, 2).join(' · ') || 'Untagged')}</text></g>`; }).join('');
     viewport.innerHTML = edges + nodeMarkup;
   }
-  function renderSelection() { const count = state.selected.size, connect = $('#connectNodes'); $('#selectionBar').classList.toggle('hidden', count < 2); connect.classList.toggle('hidden', count !== 2); connect.disabled = state.connecting; $('#selectionCount').textContent = `${count} topics selected`; }
+  function renderSelection() { const count = state.selected.size, connect = $('#connectNodes'); $('#selectionBar').classList.toggle('hidden', count < 1); connect.classList.toggle('hidden', count !== 2); connect.disabled = state.connecting; $('#selectionCount').textContent = `${count} topic${count === 1 ? '' : 's'} selected`; }
   function renderDetail() {
     const one = selectedNodes().length === 1 ? selectedNodes()[0] : null; $('#detailPanel').classList.toggle('hidden', !one); if (!one) return;
     $('#detailName').textContent = one.name; $('#detailDescription').textContent = one.description || 'No description yet.';
@@ -217,7 +217,31 @@
   }
   function selectNode(id, event) { id = String(id); if (event.shiftKey) { if (state.selected.has(id)) { state.selected.delete(id); state.selectionOrder = state.selectionOrder.filter(selectedId => selectedId !== id); } else { state.selected.add(id); state.selectionOrder.push(id); } } else { state.selected = new Set([id]); state.selectionOrder = [id]; } render(); }
   function openModal(content) { $('#modalContent').innerHTML = content; $('#modalBackdrop').classList.remove('hidden'); if (window.lucide) window.lucide.createIcons({attrs: {'stroke-width': 1.9}}); }
-  function closeModal() { $('#modalBackdrop').classList.add('hidden'); }
+  function closeModal() { $('#modalContent').querySelectorAll('video').forEach(video => video.pause()); $('#modalBackdrop').classList.add('hidden'); }
+
+  const VIDEO_STATUS_LABELS = {queued: 'Queued…', generating_script: 'Writing script…', generating_audio: 'Recording narration…', rendering: 'Rendering video…'};
+  function setVideoBusy(busy, label = '') {
+    const button = $('#generateVideo'); if (button) button.disabled = busy;
+    const status = $('#videoStatus'); status.textContent = label; status.classList.toggle('hidden', !label);
+  }
+  async function startVideoJob() {
+    if (!state.activeId || !state.selected.size) return;
+    setVideoBusy(true, 'Queued…');
+    try {
+      const {job_id} = await workspaceApi.generateVideo(state.activeId, [...state.selected].map(Number));
+      pollVideoJob(job_id, Date.now());
+    } catch (error) { setVideoBusy(false); showError(error.message); }
+  }
+  async function pollVideoJob(jobId, started) {
+    try {
+      const job = await workspaceApi.getVideoJob(jobId);
+      if (job.status === 'done') { setVideoBusy(false); return openModal(`<h2>Your video is ready</h2><video class="video-player" src="${escape(job.video_url)}" controls playsinline></video>`); }
+      if (job.status === 'failed') { setVideoBusy(false); return showError(job.error || 'Video generation failed.'); }
+      if (Date.now() - started > 5 * 60 * 1000) { setVideoBusy(false); return showError('Video generation timed out.'); }
+      setVideoBusy(true, VIDEO_STATUS_LABELS[job.status] || 'Working…');
+      setTimeout(() => pollVideoJob(jobId, started), 2000);
+    } catch (error) { setVideoBusy(false); showError(error.message); }
+  }
 
   function quizModal() {
     const topic = selectedNodes().length === 1 ? selectedNodes()[0] : null;
@@ -297,6 +321,7 @@
     if (event.target.closest('#addButton')) $('#addMenu').classList.toggle('hidden'); if (event.target.closest('#filterButton')) $('#filterMenu').classList.toggle('hidden'); if (event.target.closest('#focusMode')) { if (state.focusMode) { state.focusMode = false; state.focusNodes.clear(); render(); } else { const focusNodes = new Set(selectedNodes().map(node => String(node.id))); if (!focusNodes.size) return showError('Select one or more topics before enabling Focus Mode.'); state.focusNodes = focusNodes; state.focusMode = true; render(); } }
     if (event.target.closest('#profileArea') && !event.target.closest('#profileMenu')) { const menu = $('#profileMenu'), hidden = menu.classList.toggle('hidden'); $('#profileArea').setAttribute('aria-expanded', String(!hidden)); }
     if (event.target.closest('#generateQuiz')) quizModal(); if (event.target.closest('#bulkTag') || event.target.closest('#addTagToNode')) tagModal(state.selected); if (event.target.closest('#deleteNode') || event.target.closest('#deleteNodes')) deleteNodesModal(); if (event.target.closest('#clearSelection') || event.target.closest('#closePanel')) { clearSelection(); render(); }
+    if (event.target.closest('#generateVideo')) startVideoJob();
     if (event.target.closest('#connectNodes')) { const selected = orderedSelectedNodes(); if (state.connecting || selected.length !== 2 || !state.activeId) return showError('Select exactly two topics before connecting them.'); const [prerequisite, topic] = selected; if (prerequisite.id === topic.id) return showError('Choose two different topics to create a connection.'); if (state.graph.edges.some(edge => String(edge.prerequisite) === String(prerequisite.id) && String(edge.topic) === String(topic.id))) return showError('This prerequisite connection already exists.'); state.connecting = true; renderSelection(); workspaceApi.createPrerequisite(state.activeId, prerequisite.id, topic.id).then(({edge}) => { if (!state.graph.edges.some(item => String(item.prerequisite) === String(edge.prerequisite) && String(item.topic) === String(edge.topic))) state.graph.edges.push(edge); render(); }).catch(error => showError(error.message)).finally(() => { state.connecting = false; renderSelection(); }); }
     if (event.target.closest('#editNode')) createNodeModal(true);
     if (event.target.closest('#newSandbox')) workspaceApi.createSandbox(`New Sandbox ${state.sandboxes.length + 1}`).then(({sandbox}) => loadSandboxes(sandbox.id)).catch(error => showError(error.message));

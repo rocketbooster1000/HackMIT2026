@@ -30,5 +30,7 @@
     deleteDocument: id => request(`documents/${id}/`, {method: 'DELETE'}),
     updateDocument: (id, data) => request(`documents/${id}/`, {method: 'PATCH', body: JSON.stringify(data)}),
     uploadSyllabus: (sandboxId, file) => { const form = new FormData(); form.append('file', file); return request(`sandboxes/${sandboxId}/syllabus/`, {method: 'POST', body: form}); },
+    generateVideo: (sandboxId, topicIds) => request('videos/generate/', {method: 'POST', body: JSON.stringify({sandbox_id: sandboxId, topic_ids: topicIds})}),
+    getVideoJob: jobId => request(`videos/jobs/${jobId}/`),
   };
 })();
