@@ -11,7 +11,7 @@ from .models import Document, Prerequisite, Sandbox, Tag, Topic
 
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
-ALLOWED_UPLOAD_SUFFIXES = {".pdf", ".docx"}
+ALLOWED_UPLOAD_SUFFIXES = {".pdf", ".docx", ".ppt", ".pptx"}
 
 
 def _body(request):
@@ -32,7 +32,7 @@ def _topic_data(topic):
         "description": topic.description,
         "tags": list(topic.tags.values_list("name", flat=True)),
         "tag_ids": list(topic.tags.values_list("id", flat=True)),
-        "documents": [{"id": doc.id, "name": doc.name} for doc in topic.documents.all()],
+        "documents": [{"id": doc.id, "name": doc.name, "url": doc.file.url} for doc in topic.documents.all()],
         "order": topic.order,
         "x": topic.x,
         "y": topic.y,
@@ -60,11 +60,20 @@ def _sandbox_data(sandbox):
     return {"id": sandbox.id, "name": sandbox.name}
 
 
+def _document_data(document):
+    return {
+        "id": document.id,
+        "name": document.name,
+        "url": document.file.url,
+        "topic_ids": list(document.topics.values_list("id", flat=True)),
+    }
+
+
 def _validate_upload(upload):
     if not upload:
         return "Choose a file to upload."
     if Path(upload.name).suffix.lower() not in ALLOWED_UPLOAD_SUFFIXES:
-        return "Only PDF and DOCX files are supported."
+        return "Only PDF, DOCX, and PowerPoint files are supported."
     if upload.size > MAX_UPLOAD_BYTES:
         return "Files must be 20 MB or smaller."
     return None
@@ -113,6 +122,10 @@ def _graph_response(sandbox):
         "edges": [
             {"id": edge.id, "prerequisite": edge.prerequisite_id, "topic": edge.topic_id}
             for edge in sandbox.prerequisites.all()
+        ],
+        "documents": [
+            _document_data(document)
+            for document in sandbox.documents.prefetch_related("topics")
         ],
     })
 
@@ -244,7 +257,38 @@ def documents(request, sandbox_id):
         return _error("One or more selected topics do not exist in this sandbox.")
     document = Document.objects.create(sandbox=sandbox, file=upload, name=upload.name)
     document.topics.set(topics)
-    return JsonResponse({"document": {"id": document.id, "name": document.name, "topic_ids": [topic.id for topic in topics]}}, status=201)
+    if not topics:
+        # Bank upload with no explicit assignment: let the LLM file it.
+        try:
+            from .services.graph_builder import match_topics
+            from .services.syllabus_parser import extract_document_text
+            all_topics = list(sandbox.topics.all())
+            if all_topics:
+                text = extract_document_text(document.file.path)
+                indices = match_topics(text, [
+                    {"title": topic.name, "summary": topic.description}
+                    for topic in all_topics
+                ])
+                matched = [all_topics[i] for i in indices]
+                if matched:
+                    document.topics.set(matched)
+        except Exception:
+            pass
+    return JsonResponse({"document": _document_data(document)}, status=201)
+
+
+@require_http_methods(["PATCH", "DELETE"])
+def document_detail(request, document_id):
+    document = get_object_or_404(Document.objects.prefetch_related("topics"), pk=document_id)
+    if request.method == "DELETE":
+        document.file.delete(save=False)
+        document.delete()
+        return JsonResponse({"ok": True})
+    topics = _sandbox_topics(document.sandbox, _body(request).get("topic_ids", []))
+    if topics is None:
+        return _error("One or more selected topics do not exist in this sandbox.")
+    document.topics.set(topics)
+    return JsonResponse({"document": _document_data(document)})
 
 
 @require_http_methods(["POST"])

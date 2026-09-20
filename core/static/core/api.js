@@ -25,6 +25,8 @@
     applyTag: (sandboxId, tagId, topicIds) => request(`sandboxes/${sandboxId}/tags/`, {method: 'POST', body: JSON.stringify({tag_id: tagId, topic_ids: topicIds})}),
     removeTag: (topicId, tagId) => request(`topics/${topicId}/tags/${tagId}/`, {method: 'DELETE'}),
     uploadDocument: (sandboxId, file, topicIds) => { const form = new FormData(); form.append('file', file); form.append('topic_ids', JSON.stringify(topicIds)); return request(`sandboxes/${sandboxId}/documents/`, {method: 'POST', body: form}); },
+    deleteDocument: id => request(`documents/${id}/`, {method: 'DELETE'}),
+    updateDocument: (id, data) => request(`documents/${id}/`, {method: 'PATCH', body: JSON.stringify(data)}),
     uploadSyllabus: (sandboxId, file) => { const form = new FormData(); form.append('file', file); return request(`sandboxes/${sandboxId}/syllabus/`, {method: 'POST', body: form}); },
   };
 })();

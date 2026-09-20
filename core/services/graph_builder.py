@@ -33,6 +33,7 @@ import openai
 _MAX_NODES = 150
 _MAX_TITLE = 120
 _MAX_SUMMARY = 200
+_MAX_DOC_CHARS = 12000
 _DEFAULT_MODEL = "gpt-4.1-mini"
 
 # Strict structured-outputs schema — the model must fill every field.
@@ -146,6 +147,37 @@ Rules:
   schedule adjacency.
 - Use standard curriculum knowledge of the subject.
 - Most topics need few or no prerequisites. Omit topics with none."""
+
+# Pass used by document auto-assignment: which topics does a file cover?
+_MATCH_SCHEMA = {
+    "name": "document_topics",
+    "strict": True,
+    "schema": {
+        "type": "object",
+        "properties": {
+            "topics": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "description": "indices into the topic list",
+            },
+        },
+        "required": ["topics"],
+        "additionalProperties": False,
+    },
+}
+
+_MATCH_PROMPT = """\
+You are given the topic list of a course and a supporting document
+(lecture notes, slides, or readings). Decide which topics the document
+covers or directly supports.
+
+Rules:
+- Return indices into the topic list for every topic the document
+  meaningfully teaches or references.
+- A document can support several topics; most support only a few.
+- Base the decision ONLY on the document text — do not guess at coverage
+  that isn't there.
+- If the document covers none of the topics, return an empty list."""
 
 
 # --------------------------------------------------------------------------
@@ -273,6 +305,26 @@ def build_graph(text: str, *, model: Optional[str] = None) -> dict:
                      _DEPS_SCHEMA)
         payload["dependencies"] = deps.get("dependencies")
     return _validate(payload)
+
+
+def match_topics(text: str, topics: list, *, model: Optional[str] = None) -> list:
+    """Return indices into `topics` that the document supports."""
+    if not text.strip() or not topics:
+        return []
+    user = (
+        _topics_text(None, topics)
+        + "\n\n=== DOCUMENT ===\n\n"
+        + text[:_MAX_DOC_CHARS]
+    )
+    payload = _call(
+        _client(),
+        model or _env("OPENAI_GRAPH_MODEL", _DEFAULT_MODEL),
+        _MATCH_PROMPT, user, _MATCH_SCHEMA,
+    )
+    return sorted({
+        i for i in payload.get("topics") or []
+        if isinstance(i, int) and 0 <= i < len(topics)
+    })
 
 
 if __name__ == "__main__":
