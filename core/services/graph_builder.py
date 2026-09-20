@@ -33,7 +33,7 @@ import openai
 _MAX_NODES = 150
 _MAX_TITLE = 120
 _MAX_SUMMARY = 200
-_DEFAULT_MODEL = "gpt-4o-mini"
+_DEFAULT_MODEL = "gpt-4.1-mini"
 
 # Strict structured-outputs schema — the model must fill every field.
 _SCHEMA = {
@@ -88,9 +88,7 @@ Rules:
   them. Merge duplicate mentions; split entries that cover several clearly
   distinct topics.
 - Skip non-instructional content: holidays, "no class" days, admin notes,
-  grading/policy sections, contact info.
-- Assessments (exams, quizzes, project deadlines) count as topics when they
-  mark curriculum milestones.
+  grading/policy sections, contact info, midterms/exams.
 - title: short (10 words max) and specific.
 - summary: one sentence on what the topic covers (200 chars max).
 - date: the session's ISO date (YYYY-MM-DD) if one appears in the text —

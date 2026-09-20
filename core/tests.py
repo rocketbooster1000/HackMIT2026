@@ -19,6 +19,11 @@ class WorkspaceApiTests(TestCase):
         moved = self.client.patch(f"/api/topics/{second['id']}/", data=json.dumps({"x": 450, "y": 280}), content_type="application/json")
         self.assertEqual(moved.status_code, 200)
         self.assertEqual((moved.json()["topic"]["x"], moved.json()["topic"]["y"]), (450.0, 280.0))
+        confidence = self.client.patch(f"/api/topics/{second['id']}/", data=json.dumps({"confidence": 4}), content_type="application/json")
+        self.assertEqual(confidence.status_code, 200)
+        self.assertEqual(confidence.json()["topic"]["confidence"], 4)
+        invalid_confidence = self.client.patch(f"/api/topics/{second['id']}/", data=json.dumps({"confidence": 6}), content_type="application/json")
+        self.assertEqual(invalid_confidence.status_code, 400)
         edge = self.post_json(f"/api/sandboxes/{sandbox['id']}/prerequisites/", {"prerequisite": first["id"], "topic": second["id"]})
         self.assertEqual(edge.status_code, 201)
         self.assertEqual(self.client.post(f"/api/sandboxes/{sandbox['id']}/tags/", data=json.dumps({"tag_id": tag["id"], "topic_ids": [second["id"]]}), content_type="application/json").status_code, 200)
@@ -26,6 +31,7 @@ class WorkspaceApiTests(TestCase):
         self.assertEqual(len(graph["nodes"]), 2)
         self.assertEqual(len(graph["edges"]), 1)
         self.assertIn("Exam 1", next(node for node in graph["nodes"] if node["id"] == second["id"])["tags"])
+        self.assertEqual(next(node for node in graph["nodes"] if node["id"] == second["id"])["confidence"], 4)
         self.assertEqual(self.client.delete(f"/api/topics/{first['id']}/").status_code, 200)
         self.assertFalse(Prerequisite.objects.exists())
 
@@ -70,6 +76,40 @@ class WorkspaceApiTests(TestCase):
         self.assertEqual(Document.objects.count(), 1)
         self.assertEqual(Topic.objects.get(pk=topic["id"]).documents.count(), 1)
 
+    @patch("core.services.quiz_generator.generate_quiz")
+    def test_topic_quiz_uses_topic_context_and_returns_five_questions(self, generate_quiz):
+        sandbox = self.post_json("/api/sandboxes/", {"name": "Calculus"}).json()["sandbox"]
+        prerequisite = self.post_json(
+            f"/api/sandboxes/{sandbox['id']}/topics/", {"name": "Limits", "description": "Function behavior."}
+        ).json()["topic"]
+        topic = self.post_json(
+            f"/api/sandboxes/{sandbox['id']}/topics/", {"name": "Derivatives", "description": "Rates of change."}
+        ).json()["topic"]
+        self.post_json(
+            f"/api/sandboxes/{sandbox['id']}/prerequisites/", {"prerequisite": prerequisite["id"], "topic": topic["id"]}
+        )
+        generate_quiz.return_value = {"questions": [
+            {"question": f"Question {index}", "type": "multiple_choice", "options": ["A", "B", "C", "D"], "correct_answer": 0, "explanation": "Because A is correct."}
+            for index in range(1, 6)
+        ]}
+
+        response = self.client.post(f"/api/topics/{topic['id']}/quiz/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["quiz"]["topic"]["name"], "Derivatives")
+        self.assertEqual(len(response.json()["quiz"]["questions"]), 5)
+        context = generate_quiz.call_args.kwargs
+        self.assertEqual(context["topic"].id, topic["id"])
+        self.assertEqual(context["prerequisites"][0]["id"], prerequisite["id"])
+
+    @patch("core.services.quiz_generator.generate_quiz", side_effect=ValueError("bad response"))
+    def test_topic_quiz_returns_a_useful_error_when_generation_fails(self, _generate_quiz):
+        sandbox = self.post_json("/api/sandboxes/", {"name": "Calculus"}).json()["sandbox"]
+        topic = self.post_json(f"/api/sandboxes/{sandbox['id']}/topics/", {"name": "Limits"}).json()["topic"]
+        response = self.client.post(f"/api/topics/{topic['id']}/quiz/")
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"], "Unable to generate quiz. Please try again.")
+
     @patch("core.services.graph_builder.build_graph")
     @patch("core.services.syllabus_parser.parse_syllabus_pdf")
     def test_syllabus_multipart_post_reaches_syllabus_view(self, parse_pdf, build_graph):
@@ -82,4 +122,7 @@ class WorkspaceApiTests(TestCase):
         upload = SimpleUploadedFile("syllabus.pdf", b"%PDF-1.4 test", content_type="application/pdf")
         response = self.client.post(f"/api/sandboxes/{sandbox['id']}/syllabus/", {"file": upload})
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["nodes"][0]["name"], "Limits")
+        graph = response.json()
+        self.assertEqual(graph["nodes"][0]["name"], "Limits")
+        self.assertEqual(graph["nodes"][0]["confidence"], 0)
+        self.assertEqual(set(graph), {"sandbox", "nodes", "edges"})
