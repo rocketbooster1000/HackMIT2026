@@ -14,9 +14,11 @@ from __future__ import annotations
 
 import re
 import sys
+import zipfile
 from datetime import date, datetime
 from pathlib import Path
 from typing import BinaryIO, Optional, Union
+from xml.etree import ElementTree
 
 from dateutil import parser as dateutil_parser
 from pypdf import PdfReader
@@ -172,6 +174,27 @@ def parse_syllabus_pdf(
 
     year = default_year or _detect_year(lines)
     out = [f"PAGES: {len(pages)}", ""]
+    out.extend(_annotate_dates(line, year) for line in lines[:max_lines])
+    if len(lines) > max_lines:
+        out.append(f"... ({len(lines) - max_lines} lines truncated)")
+    return "\n".join(out)
+
+
+def parse_syllabus_docx(source: PdfSource, *, max_lines: int = 800) -> str:
+    """Extract paragraph text from a DOCX syllabus without another dependency."""
+    with zipfile.ZipFile(source) as archive:
+        document = ElementTree.fromstring(archive.read("word/document.xml"))
+    namespace = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    lines = []
+    for paragraph in document.findall(".//w:p", namespace):
+        text = "".join(node.text or "" for node in paragraph.findall(".//w:t", namespace)).strip()
+        text = _WHITESPACE_RE.sub(" ", text)
+        if text and not _PAGE_ARTIFACT_RE.match(text):
+            lines.append(text)
+    if not lines:
+        return "WARNING: no extractable text found in this DOCX file."
+    year = _detect_year(lines)
+    out = ["PAGES: unknown", ""]
     out.extend(_annotate_dates(line, year) for line in lines[:max_lines])
     if len(lines) > max_lines:
         out.append(f"... ({len(lines) - max_lines} lines truncated)")

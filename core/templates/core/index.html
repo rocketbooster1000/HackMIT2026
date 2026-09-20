@@ -1,0 +1,82 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token }}">
+  <title>Atlas — Knowledge maps</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{% static 'core/workspace.css' %}">
+  <style>
+    .sidebar { width: 264px; padding: 18px 12px 12px; background: #15161b; border-color: #2a2d35; }
+    .brand { display: flex; align-items: center; gap: 9px; padding: 4px 10px 24px; color: #f5f6f8; }
+    .brand .lucide { width: 20px; height: 20px; color: #b8a3ff; stroke-width: 1.9; }
+    .brand-mark, .sandbox-dot { display: none; }
+    .new-sandbox { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 46px; border: 1px solid #454954; border-radius: 12px; background: #282b33; color: #f2f3f6; text-align: center; font-size: 13px; }
+    .new-sandbox:hover { background: #323640; border-color: #5c6270; }.new-sandbox .lucide { width: 20px; height: 20px; stroke-width: 2; }
+    .sandbox-nav { padding: 27px 3px; }.sandbox-nav p { padding-left: 9px; margin-bottom: 10px; }
+    .sandbox-item { gap: 11px; padding: 10px; border: 1px solid transparent; color: #b7beca; }.sandbox-item .lucide { width: 19px; height: 19px; color: #929bab; stroke-width: 1.8; }.sandbox-item.active { border-color: #3a3e48; background: #292c34; color: #f5f6f9; box-shadow: 0 4px 12px #00000022; }.sandbox-item.active .lucide { color: #c3b4ff; }
+    .profile-divider { margin-top: auto; height: 1px; background: #2e313a; }.profile { position: relative; margin-top: 12px; padding: 11px; border: 1px solid #383c46; border-radius: 13px; background: #22242b; cursor: pointer; transition: background .18s ease, border-color .18s ease; }.profile:hover, .profile:focus { background: #292c34; border-color: #4a4f5b; outline: none; }
+    .avatar { width: 38px; height: 38px; background: linear-gradient(145deg, #a982ed, #7051ae); font-size: 14px; box-shadow: inset 0 1px #ffffff33; }.profile strong { font-size: 12px; color: #f0f2f5; }.profile small { font-size: 11px; color: #969dab; }.profile-chevron { display: grid; place-items: center; margin-left: auto; color: #aeb5c1; }.profile-chevron .lucide { width: 19px; height: 19px; stroke-width: 1.9; }#profileArea[aria-expanded="true"] .chevron-down, #profileArea[aria-expanded="false"] .chevron-up { display: none; }
+    .profile-menu { bottom: calc(100% + 9px); left: 0; width: 216px; padding: 7px; border: 1px solid #3d424d; border-radius: 12px; background: #252831; box-shadow: 0 18px 38px #00000088; }.profile-menu button { display: flex; align-items: center; gap: 10px; width: 100%; margin: 0; padding: 10px; border: 0; border-radius: 7px; background: transparent; color: #dce0e8; text-align: left; cursor: pointer; font: 500 12px Manrope, sans-serif; }.profile-menu button:hover { background: #343843; }.profile-menu button .lucide { width: 18px; height: 18px; color: #aeb6c4; stroke-width: 1.9; }.profile-menu .menu-divider { height: 1px; margin: 6px 2px; background: #3a3e48; }.profile-menu .logout, .profile-menu .logout .lucide { color: #f1aaaa; }
+    .selection-bar .delete-selection { display: inline-flex; align-items: center; gap: 6px; background: #55353b; color: #ffd8da; }.selection-bar .delete-selection:hover { background: #684047; }.selection-bar .delete-selection .lucide { width: 14px; height: 14px; stroke-width: 2; }.danger-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid #75474e; background: #40282d; color: #ffd8da; border-radius: 8px; padding: 10px 13px; font: 600 13px Manrope, sans-serif; cursor: pointer; }.danger-button:hover { background: #553339; }.danger-button .lucide { width: 16px; height: 16px; stroke-width: 2; }.detail-panel .danger-button.full { margin-top: 9px; }.modal-actions .danger-button { background: #b95b65; border: 0; color: #fff; }.modal-actions .danger-button:hover { background: #ca6871; }
+    .new-tag-button { display: inline-flex; align-items: center; gap: 4px; }.new-tag-button .lucide { width: 13px; height: 13px; stroke-width: 2; }.tag-remove { display: inline-flex; align-items: center; gap: 4px; border: 1px solid #49455e; cursor: pointer; font: 10px Manrope, sans-serif; }.tag-remove:hover { background: #49455e; }.tag-remove .lucide { width: 11px; height: 11px; stroke-width: 2; }.tag-error { color: #f3a2a7; font-size: 12px; margin: -4px 0 0; }
+    .upload-intro { margin-bottom: 20px !important; }.upload-drop { display: flex; min-height: 218px; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 30px; border: 1px dashed #5b6473; border-radius: 12px; background: #1b1e24; color: #aeb6c4; text-align: center; cursor: pointer; transition: border-color .18s ease, background .18s ease, transform .18s ease; }.upload-drop:hover { border-color: #9382d1; background: #20232b; }.upload-drop.is-dragover { border-color: #b9a6ff; background: #292536; box-shadow: inset 0 0 0 1px #b9a6ff55; transform: scale(1.01); }.upload-drop > .lucide { width: 34px; height: 34px; color: #b9a6ff; stroke-width: 1.7; }.upload-choose { display: inline-flex; align-items: center; gap: 7px; padding: 9px 13px; border: 1px solid #535966; border-radius: 8px; background: #2a2e37; color: #edf0f5; font: 600 12px Manrope, sans-serif; }.upload-choose .lucide { width: 16px; height: 16px; stroke-width: 2; }.upload-help { margin: 11px 0 0; color: #8992a2; text-align: center; font-size: 11px; }
+    .head-actions { gap: 7px; }.toolbar-button { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 10px; border-color: #353a44; border-radius: 8px; background: #20232a; color: #bac1cd; box-shadow: none; font-size: 12px; }.toolbar-button:hover { border-color: #4a515e; background: #282b33; color: #e1e5eb; }.toolbar-button .lucide { width: 15px; height: 15px; stroke-width: 1.9; }.toolbar-icon-button { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border-color: #353a44; border-radius: 8px; background: #20232a; color: #aeb6c3; box-shadow: none; }.toolbar-icon-button:hover { border-color: #4a515e; background: #282b33; color: #e1e5eb; }.toolbar-icon-button .lucide { width: 16px; height: 16px; stroke-width: 1.9; }
+    .filter-popover { top: 41px; width: 222px; padding: 7px; border-color: #393e49; border-radius: 11px; background: #20232a; box-shadow: 0 14px 32px #00000066; }.filter-popover h4 { margin: 16px 9px 7px; padding: 0; color: #7f8898; font-size: 10px; letter-spacing: .12em; }.filter-popover button, .filter-popover label { font: 500 12px Manrope, sans-serif; }.filter-all { display: flex; align-items: center; gap: 9px; width: 100%; padding: 9px; border: 0; border-radius: 7px; background: transparent; color: #cbd1db; text-align: left; cursor: pointer; }.filter-all:hover, .filter-all.active { background: #2a2e37; color: #f0f2f5; }.filter-radio { display: grid; place-items: center; width: 16px; height: 16px; border: 1px solid #596170; border-radius: 50%; color: #c3b1ff; }.filter-all.active .filter-radio { border-color: #ae9af3; background: #393348; }.filter-radio .lucide { width: 12px; height: 12px; stroke-width: 2.4; }.filter-check { position: relative; display: flex; align-items: center; gap: 9px; margin: 1px 0; padding: 8px 9px; border-radius: 7px; color: #aeb6c3; cursor: pointer; }.filter-check:hover { background: #292d36; color: #e5e8ed; }.filter-check input { position: absolute; width: 1px; height: 1px; opacity: 0; }.custom-checkbox { display: grid; place-items: center; width: 15px; height: 15px; border: 1px solid #535b69; border-radius: 4px; background: #191b20; color: transparent; }.filter-check input:checked + .custom-checkbox { border-color: #a996ed; background: #71639e; color: #fff; }.custom-checkbox .lucide { width: 11px; height: 11px; stroke-width: 2.5; }.reset-filter { margin: 7px 2px 1px; padding: 7px!important; color: #aaa0dc!important; font-size: 11px!important; }
+    .filter-popover .filter-all { margin: 1px 0; padding: 8px 9px; border: 0; background: transparent; color: #aeb6c3; }.filter-popover .filter-all:hover { background: #292d36; color: #e5e8ed; }.filter-popover .custom-checkbox.checked { border-color: #a996ed; background: #71639e; color: #fff; }
+    .rename-wrap { position: relative; }.rename-popover { top: 42px; left: 0; width: 252px; padding: 16px; border-color: #3b404b; border-radius: 11px; background: #20232a; box-shadow: 0 16px 36px #00000077; }.rename-popover h2 { margin: 0 0 15px; color: #eef0f4; font-size: 14px; letter-spacing: -.2px; }.rename-popover .field { display: block; margin: 0; padding: 0; color: #aeb5c1; font-size: 11px; }.rename-popover input { width: 100%; margin-top: 7px; border: 1px solid #3b414e; border-radius: 7px; background: #181a20; color: #f0f2f5; padding: 9px 10px; outline: none; font: 12px Manrope, sans-serif; }.rename-popover input:focus { border-color: #9583d0; box-shadow: 0 0 0 2px #9583d022; }.rename-actions { display: flex; justify-content: flex-end; gap: 7px; margin-top: 14px; }.rename-actions .soft-button, .rename-actions .primary-button { padding: 8px 11px; font-size: 11px; }
+    .sandbox-row { position: relative; }.sandbox-row .sandbox-item { padding-right: 39px; }.sandbox-delete { position: absolute; top: 50%; right: 7px; display: grid; place-items: center; width: 27px; height: 27px; transform: translateY(-50%); border: 0; border-radius: 6px; background: transparent; color: #a58a91; cursor: pointer; opacity: 0; transition: opacity .16s ease, background .16s ease, color .16s ease; }.sandbox-delete .lucide { width: 15px; height: 15px; stroke-width: 1.9; }.sandbox-row:hover .sandbox-delete, .sandbox-delete:focus { opacity: 1; outline: none; }.sandbox-delete:hover { background: #432a2f; color: #f1a7ac; }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="/" aria-label="Atlas home"><i data-lucide="book-open"></i> atlas</a>
+      <button class="new-sandbox" id="newSandbox"><i data-lucide="plus"></i> New sandbox</button>
+      <nav class="sandbox-nav" aria-label="Sandboxes">
+        <p>Sandboxes</p>
+        <div id="sandboxList"></div>
+      </nav>
+      <div class="profile-divider"></div>
+      <div class="profile" id="profileArea" role="button" tabindex="0" aria-haspopup="menu" aria-expanded="false"><div class="avatar">D</div><div><strong>John Doe</strong><small>Student</small></div><span class="profile-chevron"><i class="chevron-down" data-lucide="chevron-down"></i><i class="chevron-up" data-lucide="chevron-up"></i></span><div class="profile-menu popover hidden" id="profileMenu" role="menu"><button type="button" data-profile-action="profile" role="menuitem"><i data-lucide="user"></i>Profile</button><button type="button" data-profile-action="settings" role="menuitem"><i data-lucide="settings"></i>Settings</button><button type="button" data-profile-action="help" role="menuitem"><i data-lucide="circle-help"></i>Help</button><div class="menu-divider"></div><button type="button" class="logout" data-profile-action="logout" role="menuitem"><i data-lucide="log-out"></i>Log out</button></div></div>
+    </aside>
+
+    <main class="workspace">
+      <header class="workspace-head">
+        <div><div class="eyebrow">KNOWLEDGE MAP</div><h1 id="sandboxTitle">Calculus I</h1></div>
+        <div class="head-actions">
+          <div class="rename-wrap" id="renameWrap"><button class="soft-button toolbar-button" id="renameSandbox"><i data-lucide="pencil"></i><span>Rename</span></button><div class="popover rename-popover hidden" id="renamePopover"><form id="renameForm"><h2>Rename Sandbox</h2><label class="field" for="renameInput">Sandbox name</label><input id="renameInput" autocomplete="off" required><div class="rename-actions"><button type="button" class="soft-button" id="cancelRename">Cancel</button><button class="primary-button">Rename</button></div></form></div></div>
+          <div class="filter-wrap"><button class="soft-button toolbar-button" id="filterButton"><span>View</span><i data-lucide="chevron-down"></i></button><div class="popover filter-popover hidden" id="filterMenu"></div></div>
+          <button class="icon-button toolbar-icon-button" id="zoomOut" aria-label="Zoom out"><i data-lucide="minus"></i></button><button class="icon-button toolbar-icon-button" id="zoomIn" aria-label="Zoom in"><i data-lucide="plus"></i></button>
+        </div>
+      </header>
+
+      <section class="graph-stage" id="graphStage" style="user-select: none; -webkit-user-select: none;">
+        <div class="graph-canvas" id="graphCanvas">
+          <svg id="graphSvg" role="img" aria-label="Interactive knowledge graph" viewBox="0 0 1000 650">
+            <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8Z" fill="#62708a" /></marker></defs>
+            <g id="graphViewport"></g>
+            <rect id="selectionBox" class="hidden" pointer-events="none" fill="#a997e926" stroke="#c3b5ff" stroke-width="1.5" stroke-dasharray="5 4" />
+          </svg>
+          <div class="graph-hint" id="graphHint">Click a topic to inspect it <span>•</span> Shift + click to select more</div>
+        </div>
+        <button class="floating-add" id="addButton" aria-label="Add to sandbox">+</button>
+        <div class="add-menu popover hidden" id="addMenu"><button data-action="syllabus"><span class="menu-icon">✦</span><span>Upload syllabus<small>Build a map with AI</small></span></button><button data-action="document"><span class="menu-icon">↑</span><span>Upload document<small>Notes, slides, or readings</small></span></button><button data-action="node"><span class="menu-icon">＋</span><span>Create node<small>Add a topic manually</small></span></button></div>
+        <div class="selection-bar hidden" id="selectionBar"><span id="selectionCount"></span><button id="bulkTag">Add tag</button><button class="delete-selection" id="deleteNodes"><i data-lucide="trash-2"></i>Delete Nodes</button><button class="plain-button" id="clearSelection">Clear</button></div>
+        <div class="empty-state hidden" id="emptyState"><div class="empty-orbit">✦</div><h2>Your knowledge map is empty.</h2><p>Upload a syllabus to automatically generate<br>your knowledge map.</p><div><button class="primary-button" data-action="syllabus">Upload syllabus</button><button class="soft-button" data-action="node">Create node</button></div></div>
+      </section>
+
+      <aside class="detail-panel hidden" id="detailPanel"><button class="close-panel" id="closePanel" aria-label="Close panel">×</button><div class="detail-kicker">TOPIC</div><h2 id="detailName"></h2><section><h3>Description</h3><p id="detailDescription"></p></section><section><h3>Prerequisites</h3><ul id="detailPrerequisites"></ul></section><section><h3>Documents</h3><ul id="detailDocuments"></ul></section><section><h3>Tags</h3><div class="tag-list" id="detailTags"></div></section><button class="primary-button full" id="editNode">Edit topic</button><button class="danger-button full" id="deleteNode"><i data-lucide="trash-2"></i>Delete Node</button></aside>
+    </main>
+  </div>
+
+  <div class="modal-backdrop hidden" id="modalBackdrop"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle"><button class="close-panel modal-close" data-close-modal aria-label="Close">×</button><div id="modalContent"></div></div></div>
+  <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+  <script src="{% static 'core/api.js' %}"></script>
+  <script src="{% static 'core/workspace.js' %}"></script>
+</body>
+</html>

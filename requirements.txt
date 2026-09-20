@@ -1,4 +1,7 @@
 asgiref==3.12.1
 Django==5.2.17
+openai==1.109.1
+pypdf==6.19.0
+python-dateutil==2.9.0.post0
 python-dotenv==1.2.3
 sqlparse==0.6.0
