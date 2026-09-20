@@ -31,6 +31,7 @@ class Topic(models.Model):
     order = models.PositiveIntegerField(default=0)
     x = models.FloatField(null=True, blank=True)
     y = models.FloatField(null=True, blank=True)
+    confidence = models.IntegerField(default=0)
     tags = models.ManyToManyField(Tag, related_name="topics", blank=True)
 
     class Meta:

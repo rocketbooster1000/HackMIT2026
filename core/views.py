@@ -36,6 +36,7 @@ def _topic_data(topic):
         "order": topic.order,
         "x": topic.x,
         "y": topic.y,
+        "confidence": topic.confidence,
     }
 
 
@@ -186,6 +187,12 @@ def topic_detail(request, topic_id):
             return _error("Node coordinates must be valid numbers.")
         topic.x, topic.y = coordinates
         update_fields.extend(["x", "y"])
+    if "confidence" in data:
+        confidence = data["confidence"]
+        if isinstance(confidence, bool) or not isinstance(confidence, int) or not 0 <= confidence <= 5:
+            return _error("Confidence must be an integer from 0 to 5.")
+        topic.confidence = confidence
+        update_fields.append("confidence")
     if update_fields:
         topic.save(update_fields=update_fields)
     if "tag_ids" in data:
