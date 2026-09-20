@@ -1,7 +1,7 @@
 (() => {
   const $ = selector => document.querySelector(selector);
   const escape = value => String(value ?? '').replace(/[&<>"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[char]));
-  const state = {sandboxes: [], activeId: null, graph: {nodes: [], edges: []}, graphRequestId: 0, tags: [], selected: new Set(), selectionOrder: [], filters: new Set(), confidenceFilter: null, focusMode: false, focusNodes: new Set(), connecting: false, confidenceSaving: new Set(), transform: {x: 0, y: 0, scale: 1}};
+  const state = {sandboxes: [], activeId: null, graph: {nodes: [], edges: [], documents: []}, graphRequestId: 0, tags: [], selected: new Set(), selectionOrder: [], filters: new Set(), docFilters: new Set(), confidenceFilter: null, focusMode: false, focusNodes: new Set(), connecting: false, confidenceSaving: new Set(), bankOpen: false, transform: {x: 0, y: 0, scale: 1}};
   const active = () => state.sandboxes.find(sandbox => sandbox.id === state.activeId);
   const nodes = () => state.graph.nodes || [];
   const nodeById = id => nodes().find(node => String(node.id) === String(id));
@@ -107,7 +107,7 @@
   }
   function graphNodes() {
     const focused = focusedNodeIds();
-    const visible = nodes().filter(node => (!state.filters.size || (node.tag_ids || []).some(id => state.filters.has(String(id)))) && (state.confidenceFilter === null || Number(node.confidence || 0) === state.confidenceFilter) && (!focused || focused.has(String(node.id))));
+    const visible = nodes().filter(node => (!state.filters.size || (node.tag_ids || []).some(id => state.filters.has(String(id)))) && (state.confidenceFilter === null || Number(node.confidence || 0) === state.confidenceFilter) && (!state.docFilters.size || (node.documents || []).some(doc => state.docFilters.has(String(doc.id)))) && (!focused || focused.has(String(node.id))));
     return visible.map((node, index) => ({...node, ...nodeGeometry(node), x: node.x ?? defaultPosition(node, index).x, y: node.y ?? defaultPosition(node, index).y}));
   }
   async function loadSandboxes(preferredId = null) {
@@ -115,8 +115,8 @@
     state.sandboxes = data.sandboxes;
     const next = preferredId && state.sandboxes.some(s => s.id === preferredId) ? preferredId : state.sandboxes[0]?.id || null;
     state.activeId = next;
-    clearSelection(); state.filters.clear(); state.confidenceFilter = null;
-    if (next) await loadGraph(next); else { state.graph = {nodes: [], edges: []}; render(); }
+    clearSelection(); state.filters.clear(); state.docFilters.clear(); state.confidenceFilter = null;
+    if (next) await loadGraph(next); else { state.graph = {nodes: [], edges: [], documents: []}; render(); }
   }
   async function loadGraph(sandboxId = state.activeId) {
     if (!sandboxId) return;
@@ -131,7 +131,7 @@
   }
   function setGraph(data) {
     const shouldLayout = needsInitialLayout(data.nodes);
-    state.graph = {nodes: shouldLayout ? layeredLayout(data.nodes, data.edges) : data.nodes, edges: data.edges};
+    state.graph = {nodes: shouldLayout ? layeredLayout(data.nodes, data.edges) : data.nodes, edges: data.edges, documents: data.documents || []};
     if (shouldLayout) {
       Promise.all(state.graph.nodes.map(node => workspaceApi.updateNode(node.id, {x: node.x, y: node.y}))).catch(error => showError(`Automatic layout was not saved: ${error.message}`));
     }
@@ -141,7 +141,7 @@
     state.graphRequestId += 1;
     setGraph({nodes: data.nodes, edges: data.edges});
     clearSelection();
-    state.filters.clear();
+    state.filters.clear(); state.docFilters.clear();
     state.confidenceFilter = null;
     state.focusMode = false;
     state.focusNodes.clear();
@@ -163,8 +163,14 @@
   function renderFilter() {
     const allTags = state.tags;
     const confidenceOptions = [{value: null, label: 'All'}, {value: 0, label: 'Unrated'}, {value: 1, label: '★'}, {value: 2, label: '★★'}, {value: 3, label: '★★★'}, {value: 4, label: '★★★★'}, {value: 5, label: '★★★★★'}];
-    const filtersActive = state.filters.size || state.confidenceFilter !== null;
-    $('#filterMenu').innerHTML = `<button class="filter-all filter-check" data-all-filter><span class="custom-checkbox ${filtersActive ? '' : 'checked'}"><i data-lucide="check"></i></span>All topics</button><h4>Tags</h4>${allTags.map(tag => `<label class="filter-check"><input type="checkbox" data-filter-tag="${tag.id}" ${state.filters.has(String(tag.id)) ? 'checked' : ''}><span class="custom-checkbox"><i data-lucide="check"></i></span>${escape(tag.name)}</label>`).join('')}<h4>Confidence</h4>${confidenceOptions.map(option => `<label class="filter-check"><input type="radio" name="confidenceFilter" data-filter-confidence="${option.value === null ? 'all' : option.value}" ${state.confidenceFilter === option.value ? 'checked' : ''}><span class="custom-checkbox"><i data-lucide="check"></i></span>${option.label}</label>`).join('')}<button class="reset-filter ${filtersActive ? '' : 'hidden'}" data-reset-filter>Reset filters</button>`;
+    const docs = (state.graph.documents || []).filter(doc => (doc.topic_ids || []).length);
+    const filtersActive = state.filters.size || state.confidenceFilter !== null || state.docFilters.size;
+    $('#filterMenu').innerHTML = `<button class="filter-all filter-check" data-all-filter><span class="custom-checkbox ${filtersActive ? '' : 'checked'}"><i data-lucide="check"></i></span>All topics</button><h4>Tags</h4>${allTags.map(tag => `<label class="filter-check"><input type="checkbox" data-filter-tag="${tag.id}" ${state.filters.has(String(tag.id)) ? 'checked' : ''}><span class="custom-checkbox"><i data-lucide="check"></i></span>${escape(tag.name)}</label>`).join('')}<h4>Confidence</h4>${confidenceOptions.map(option => `<label class="filter-check"><input type="radio" name="confidenceFilter" data-filter-confidence="${option.value === null ? 'all' : option.value}" ${state.confidenceFilter === option.value ? 'checked' : ''}><span class="custom-checkbox"><i data-lucide="check"></i></span>${option.label}</label>`).join('')}${docs.length ? `<h4>Documents</h4>${docs.map(doc => `<label class="filter-check"><input type="checkbox" data-filter-doc="${doc.id}" ${state.docFilters.has(String(doc.id)) ? 'checked' : ''}><span class="custom-checkbox"><i data-lucide="check"></i></span><i data-lucide="file-text" class="filter-doc-icon"></i>${escape(doc.name)}</label>`).join('')}` : ''}<button class="reset-filter ${filtersActive ? '' : 'hidden'}" data-reset-filter>Reset filters</button>`;
+  }
+  function renderBank() {
+    const docs = state.graph.documents || [];
+    $('#docBankPanel').classList.toggle('hidden', !active() || !state.bankOpen);
+    $('#bankList').innerHTML = docs.length ? docs.map(doc => `<div class="bank-doc" draggable="true" data-bank-doc="${doc.id}"><i data-lucide="file-text"></i><span class="bank-doc-name">${escape(doc.name)}</span><span class="bank-doc-count">${doc.topic_ids.length ? `${doc.topic_ids.length} topic${doc.topic_ids.length === 1 ? '' : 's'}` : 'Unassigned'}</span><button class="doc-delete" data-delete-doc="${doc.id}" aria-label="Delete ${escape(doc.name)}"><i data-lucide="x"></i></button></div>`).join('') : '<p class="bank-hint">No documents yet — drop files above.</p>';
   }
   function renderFocusMode() {
     const button = $('#focusMode');
@@ -284,8 +290,9 @@
     if (!event.target.closest('#profileArea') && !event.target.closest('#profileMenu')) { $('#profileMenu').classList.add('hidden'); $('#profileArea').setAttribute('aria-expanded', 'false'); }
     const deleteSandbox = event.target.closest('[data-delete-sandbox]'); if (deleteSandbox) { deleteSandboxModal(Number(deleteSandbox.dataset.deleteSandbox)); return; }
     const node = event.target.closest('[data-node]'); if (node) { if (suppressNodeClick) return; selectNode(node.dataset.node, event); return; }
-    const sandbox = event.target.closest('[data-sandbox]'); if (sandbox) { state.activeId = Number(sandbox.dataset.sandbox); clearSelection(); state.filters.clear(); state.confidenceFilter = null; loadGraph(state.activeId).catch(error => showError(error.message)); return; }
-    const action = event.target.closest('[data-action]')?.dataset.action; if (action === 'node' && active()) createNodeModal(); if (action === 'document' && active()) documentModal(); if (action === 'syllabus' && active()) syllabusModal();
+    const sandbox = event.target.closest('[data-sandbox]'); if (sandbox) { state.activeId = Number(sandbox.dataset.sandbox); clearSelection(); state.filters.clear(); state.docFilters.clear(); state.confidenceFilter = null; loadGraph(state.activeId).catch(error => showError(error.message)); return; }
+    const action = event.target.closest('[data-action]')?.dataset.action; if (action === 'node' && active()) createNodeModal(); if (action === 'document' && active()) { state.bankOpen = true; render(); } if (action === 'syllabus' && active()) syllabusModal();
+    if (event.target.closest('#docBankButton')) { state.bankOpen = !state.bankOpen; render(); }
     if (event.target.closest('#addButton')) $('#addMenu').classList.toggle('hidden'); if (event.target.closest('#filterButton')) $('#filterMenu').classList.toggle('hidden'); if (event.target.closest('#focusMode')) { if (state.focusMode) { state.focusMode = false; state.focusNodes.clear(); render(); } else { const focusNodes = new Set(selectedNodes().map(node => String(node.id))); if (!focusNodes.size) return showError('Select one or more topics before enabling Focus Mode.'); state.focusNodes = focusNodes; state.focusMode = true; render(); } }
     if (event.target.closest('#profileArea') && !event.target.closest('#profileMenu')) { const menu = $('#profileMenu'), hidden = menu.classList.toggle('hidden'); $('#profileArea').setAttribute('aria-expanded', String(!hidden)); }
     if (event.target.closest('#generateQuiz')) quizModal(); if (event.target.closest('#bulkTag') || event.target.closest('#addTagToNode')) tagModal(state.selected); if (event.target.closest('#deleteNode') || event.target.closest('#deleteNodes')) deleteNodesModal(); if (event.target.closest('#clearSelection') || event.target.closest('#closePanel')) { clearSelection(); render(); }
@@ -299,13 +306,13 @@
     const deleteDoc = event.target.closest('[data-delete-doc]'); if (deleteDoc) { workspaceApi.deleteDocument(Number(deleteDoc.dataset.deleteDoc)).then(() => refreshGraph()).catch(error => showError(error.message)); return; }
     const remove = event.target.closest('[data-remove-tag-id]'); if (remove) { const node = selectedNodes()[0], tag = tagById(remove.dataset.removeTagId); if (!node || !tag) return showError('This tag is no longer available.'); workspaceApi.removeTag(node.id, tag.id).then(() => { node.tag_ids = (node.tag_ids || []).filter(id => String(id) !== String(tag.id)); node.tags = (node.tags || []).filter(name => name !== tag.name); render(); }).catch(error => showError(error.message)); }
     if (event.target.closest('#confirmDeleteNodes')) Promise.all([...state.selected].map(workspaceApi.deleteNode)).then(async () => { clearSelection(); closeModal(); await refreshGraph(); }).catch(error => showError(error.message));
-    const confirmDeleteSandbox = event.target.closest('#confirmDeleteSandbox'); if (confirmDeleteSandbox) { const sandboxId = Number(confirmDeleteSandbox.dataset.sandboxId); workspaceApi.deleteSandbox(sandboxId).then(async () => { const wasActive = state.activeId === sandboxId; state.sandboxes = state.sandboxes.filter(sandbox => sandbox.id !== sandboxId); closeModal(); if (wasActive) { state.activeId = state.sandboxes[0]?.id || null; clearSelection(); state.filters.clear(); state.confidenceFilter = null; if (state.activeId) await loadGraph(state.activeId); else { state.graph = {nodes: [], edges: []}; render(); } } else render(); }).catch(error => showError(error.message)); }
-    if (event.target.closest('[data-all-filter]') || event.target.closest('[data-reset-filter]')) { state.filters.clear(); state.confidenceFilter = null; render(); }
+    const confirmDeleteSandbox = event.target.closest('#confirmDeleteSandbox'); if (confirmDeleteSandbox) { const sandboxId = Number(confirmDeleteSandbox.dataset.sandboxId); workspaceApi.deleteSandbox(sandboxId).then(async () => { const wasActive = state.activeId === sandboxId; state.sandboxes = state.sandboxes.filter(sandbox => sandbox.id !== sandboxId); closeModal(); if (wasActive) { state.activeId = state.sandboxes[0]?.id || null; clearSelection(); state.filters.clear(); state.docFilters.clear(); state.confidenceFilter = null; if (state.activeId) await loadGraph(state.activeId); else { state.graph = {nodes: [], edges: [], documents: []}; render(); } } else render(); }).catch(error => showError(error.message)); }
+    if (event.target.closest('[data-all-filter]') || event.target.closest('[data-reset-filter]')) { state.filters.clear(); state.docFilters.clear(); state.confidenceFilter = null; render(); }
   });
   $('#renameForm').addEventListener('submit', event => { event.preventDefault(); const name = $('#renameInput').value.trim(); if (!name || !active()) return; workspaceApi.renameSandbox(active().id, name).then(({sandbox}) => { active().name = sandbox.name; closeRenamePopover(); render(); }).catch(error => showError(error.message)); });
   $('#profileArea').addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); $('#profileArea').click(); } });
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && !$('#renamePopover').classList.contains('hidden')) { event.preventDefault(); closeRenamePopover(); } });
-  document.addEventListener('change', event => { if (event.target.matches('[data-filter-tag]')) { const tag = tagById(event.target.dataset.filterTag); if (!tag) return; event.target.checked ? state.filters.add(String(tag.id)) : state.filters.delete(String(tag.id)); render(); } if (event.target.matches('[data-filter-confidence]')) { const value = event.target.dataset.filterConfidence; state.confidenceFilter = value === 'all' ? null : Number(value); render(); } });
+  document.addEventListener('change', event => { if (event.target.matches('[data-filter-tag]')) { const tag = tagById(event.target.dataset.filterTag); if (!tag) return; event.target.checked ? state.filters.add(String(tag.id)) : state.filters.delete(String(tag.id)); render(); } if (event.target.matches('[data-filter-confidence]')) { const value = event.target.dataset.filterConfidence; state.confidenceFilter = value === 'all' ? null : Number(value); render(); } if (event.target.matches('[data-filter-doc]')) { const id = String(event.target.dataset.filterDoc); event.target.checked ? state.docFilters.add(id) : state.docFilters.delete(id); render(); } });
 
   const graphSvg = $('#graphSvg'), selectionBox = $('#selectionBox'); let graphDrag = null, suppressNodeClick = false;
   const pointInSvg = event => { const point = graphSvg.createSVGPoint(); point.x = event.clientX; point.y = event.clientY; return point.matrixTransform(graphSvg.getScreenCTM().inverse()); };

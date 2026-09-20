@@ -195,4 +195,4 @@ class WorkspaceApiTests(TestCase):
         graph = response.json()
         self.assertEqual(graph["nodes"][0]["name"], "Limits")
         self.assertEqual(graph["nodes"][0]["confidence"], 0)
-        self.assertEqual(set(graph), {"sandbox", "nodes", "edges"})
+        self.assertEqual(set(graph), {"sandbox", "nodes", "edges", "documents"})
