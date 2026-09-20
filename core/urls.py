@@ -13,6 +13,7 @@ urlpatterns = [
     path("sandboxes/<int:sandbox_id>/documents/", views.documents, name="documents"),
     path("sandboxes/<int:sandbox_id>/syllabus/", views.syllabus, name="syllabus"),
     path("topics/<int:topic_id>/quiz/", views.topic_quiz, name="topic-quiz"),
+    path("documents/<int:document_id>/", views.document_detail, name="document-detail"),
     path("topics/<int:topic_id>/", views.topic_detail, name="topic-detail"),
     path("topics/<int:topic_id>/tags/<int:tag_id>/", views.remove_tag, name="remove-tag"),
     path("tags/", views.tags, name="tags"),
