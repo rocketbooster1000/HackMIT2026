@@ -67,9 +67,7 @@ def run_video_job(job_id: int) -> None:
             scenes.append({
                 "title": scene["title"],
                 "bullets": scene["on_screen_text"],
-                "keywords": scene.get("keywords") or [],
-                "layout": scene.get("layout") or "definition",
-                "visual": scene.get("visual") or "",
+                "markup": scene.get("markup") or "",
                 "assumption": scene.get("assumption"),
                 "audio": audio_path,
                 "durationInFrames": int(seconds * 30 + 0.999),

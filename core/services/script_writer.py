@@ -7,16 +7,14 @@ prerequisite names for context) and returns a validated script:
         "title": "...",
         "scenes": [{"title": ..., "narration": ...,
                      "on_screen_text": ["bullet", ...],
-                     "visual": "advisory scene description",
-                     "keywords": [{"term": ..., "icon": "Dna" | null}, ...],
-                     "layout": "definition" | "process" | "recap",
+                     "markup": "self-contained HTML/SVG for the scene",
                      "assumption": "..." | null,
                      "duration_hint": seconds}, ...],
     }
 
 `duration_hint` is advisory only — real scene timing comes from the TTS
-audio length in the pipeline. `visual` is advisory too: it describes the
-ideal on-screen content for future renderers but is never shown.
+audio length in the pipeline. `markup` is rendered verbatim in the
+Remotion composition: the model invents each scene's visual itself.
 
 Follows the same strict-JSON-schema approach as `graph_builder.py`.
 
@@ -27,6 +25,7 @@ Usage:
 from __future__ import annotations
 
 import json
+import re
 import sys
 from typing import Optional
 
@@ -39,13 +38,8 @@ _MAX_TITLE = 120
 _MAX_NARRATION = 1200
 _MAX_BULLETS = 5
 _MAX_BULLET_LEN = 90
-_MAX_KEYWORDS = 5
-_MAX_KEYWORD_LEN = 40
-_MAX_ICON_LEN = 60
-_MAX_VISUAL = 300
+_MAX_MARKUP = 12000
 _MAX_ASSUMPTION = 200
-_LAYOUTS = {"definition", "process", "recap"}
-_DEFAULT_LAYOUT = "definition"
 _DEFAULT_MODEL = "gpt-4o-mini"
 
 _SCHEMA = {
@@ -75,36 +69,13 @@ _SCHEMA = {
                             "description": "short bullets shown on screen, "
                                            "max 10 words each",
                         },
-                        "visual": {
+                        "markup": {
                             "type": "string",
-                            "description": "plain-English description of the "
-                                           "ideal on-screen content; advisory "
-                                           "only, never shown to the viewer",
-                        },
-                        "keywords": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "term": {"type": "string"},
-                                    "icon": {
-                                        "type": ["string", "null"],
-                                        "description": "lucide icon name when "
-                                                       "confident, else null",
-                                    },
-                                },
-                                "required": ["term", "icon"],
-                                "additionalProperties": False,
-                            },
-                            "description": "2-5 key terms driving icon/asset "
-                                           "selection for this scene",
-                        },
-                        "layout": {
-                            "type": "string",
-                            "enum": ["definition", "process", "recap"],
-                            "description": "definition: introduce a term; "
-                                           "process: steps/mechanism flow; "
-                                           "recap: closing summary",
+                            "description": "self-contained HTML or inline SVG "
+                                           "filling the entire 1920x1080 "
+                                           "frame; the model owns all "
+                                           "on-screen content. No external "
+                                           "resources, no <script>",
                         },
                         "assumption": {
                             "type": ["string", "null"],
@@ -118,8 +89,7 @@ _SCHEMA = {
                         },
                     },
                     "required": ["title", "narration", "on_screen_text",
-                                 "visual", "keywords", "layout", "assumption",
-                                 "duration_hint"],
+                                 "markup", "assumption", "duration_hint"],
                     "additionalProperties": False,
                 },
             },
@@ -141,10 +111,9 @@ Scene rules:
 - 3-6 scenes, never more than 8. If the source material is thin, use
   fewer scenes rather than padding. Keep total narration under ~90
   seconds.
-- Order scenes definition -> mechanism -> significance unless the
-  topic's keywords imply otherwise. Scene 1 states what the video
-  covers; the last scene recaps the key takeaway. Middle scenes teach
-  one idea each, in a sensible learning order (prerequisites first).
+- Order scenes so ideas build sensibly (prerequisites first): introduce
+  the concept, explain the mechanism, close with significance. Scene 1
+  states what the video covers; the last scene recaps the key takeaway.
 - If two selected topics overlap in scope, merge the shared material
   into one scene — never repeat content.
 
@@ -153,17 +122,23 @@ Per scene:
 - narration: 1-3 sentences spoken aloud verbatim by TTS. One idea per
   sentence, conversational, no markdown, no headers, no scene labels,
   no visual directions.
-- on_screen_text: 1-4 bullets of visible overlay text reinforcing (not
-  repeating verbatim) the narration. Max 10 words per bullet.
-- visual: plain-English description of the ideal on-screen content,
-  specific enough to build without follow-up questions. Advisory only —
-  it is never shown to the viewer.
-- keywords: 2-5 key terms driving icon selection, each {"term", "icon"}.
-  Set icon to a lucide icon name only when confident (e.g. "Dna",
-  "Sigma", "FlaskConical"); otherwise null. Reuse identical term and
-  icon names across scenes so recurring concepts render identically.
-- layout: "definition" to introduce a term, "process" for steps or a
-  mechanism, "recap" for the closing summary.
+- markup: self-contained HTML or inline SVG that fills the ENTIRE
+  1920x1080 frame — you own the whole canvas. Nothing is drawn for you:
+  include the scene's heading, labels, diagrams, equations, callouts,
+  whatever the idea needs, positioned and styled however you want.
+  You may embed <style> blocks — CSS animations and transitions do play
+  during rendering, so animate entrances, highlights, flows. Hard
+  rules: self-contained only — no external images, fonts, scripts,
+  iframes, or links; no <script> or on* event handlers; no markdown.
+  Design light-on-dark (background #16161a, text #f5f1ea, muted
+  #8a8378, accent hues of your choice), font sizes >= 28px,
+  system-ui / sans-serif. Prefer inline SVG with a viewBox and
+  width/height of 100%, or absolutely-positioned divs on a full-size
+  root element, so your layout fills the frame at any render size.
+- on_screen_text: 1-4 bullets reinforcing (not repeating verbatim) the
+  narration, max 10 words each. These are a fallback — they render only
+  if markup is empty — so still write them, but design markup to carry
+  the scene on its own.
 - assumption: one short sentence flagging any simplification or
   uncertain claim; null when nothing needs flagging.
 - duration_hint: estimated narration seconds, based on ~150 words/min
@@ -196,24 +171,15 @@ def _topics_text(topics, prerequisites_of) -> str:
     return "\n".join(lines)
 
 
-def _keywords(raw) -> list:
-    """Normalize keyword entries to [{"term", "icon"}], deduped, capped."""
-    seen, out = set(), []
-    for item in raw or []:
-        if isinstance(item, dict):
-            term, icon = item.get("term"), item.get("icon")
-        else:  # tolerate bare strings
-            term, icon = item, None
-        term = str(term or "").strip()[:_MAX_KEYWORD_LEN]
-        key = term.lower()
-        if not term or key in seen:
-            continue
-        seen.add(key)
-        icon = str(icon).strip()[:_MAX_ICON_LEN] if icon else None
-        out.append({"term": term, "icon": icon or None})
-        if len(out) >= _MAX_KEYWORDS:
-            break
-    return out
+def _markup(raw) -> str:
+    """Return the scene's HTML/SVG, stripped of scripts and handlers."""
+    markup = str(raw or "").strip()[:_MAX_MARKUP]
+    markup = re.sub(r"<script[^>]*>.*?</script\s*>", "", markup,
+                    flags=re.IGNORECASE | re.DOTALL)
+    markup = re.sub(r"<script[^>]*/?>", "", markup, flags=re.IGNORECASE)
+    markup = re.sub(r"\son[a-z]+\s*=", " data-removed=", markup,
+                    flags=re.IGNORECASE)
+    return markup
 
 
 def _validate(payload: dict) -> dict:
@@ -227,9 +193,6 @@ def _validate(payload: dict) -> dict:
             for b in raw.get("on_screen_text") or []
             if str(b).strip()
         ][: _MAX_BULLETS]
-        layout = str(raw.get("layout") or "").strip().lower()
-        if layout not in _LAYOUTS:
-            layout = _DEFAULT_LAYOUT
         assumption = str(raw.get("assumption") or "").strip()[:_MAX_ASSUMPTION]
         try:
             hint = float(raw.get("duration_hint") or 0)
@@ -239,9 +202,7 @@ def _validate(payload: dict) -> dict:
             "title": str(raw.get("title") or "").strip()[:_MAX_TITLE] or f"Scene {len(scenes) + 1}",
             "narration": narration[:_MAX_NARRATION],
             "on_screen_text": bullets,
-            "visual": str(raw.get("visual") or "").strip()[:_MAX_VISUAL],
-            "keywords": _keywords(raw.get("keywords")),
-            "layout": layout,
+            "markup": _markup(raw.get("markup")),
             "assumption": assumption or None,
             "duration_hint": max(0.0, hint),
         })

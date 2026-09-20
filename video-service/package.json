@@ -9,7 +9,6 @@
   "dependencies": {
     "@remotion/bundler": "4.0.524",
     "@remotion/renderer": "4.0.524",
-    "lucide-react": "1.45.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "remotion": "4.0.524"
