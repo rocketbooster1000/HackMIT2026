@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('core', '0002_topic_x_topic_y'),
+        ('core', '0003_topic_confidence'),
     ]
 
     operations = [
